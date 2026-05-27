@@ -1,0 +1,2125 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Personal Strategy Backtest Dashboard</title>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <script src="/vendor/highcharts/highstock.js"></script>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark"><i data-lucide="candlestick-chart"></i></div>
+          <div>
+            <strong>Backtest Desk</strong>
+            <span>Personal strategy</span>
+          </div>
+        </div>
+        <nav class="side-nav">
+          <a href="#setup" class="active"><i data-lucide="sliders-horizontal"></i> Setup</a>
+          <a href="#analytics"><i data-lucide="bar-chart-3"></i> Analytics</a>
+          <a href="#ratios"><i data-lucide="percent"></i> Ratios</a>
+          <a href="#records"><i data-lucide="table-2"></i> Records</a>
+          <a href="#optimizer"><i data-lucide="search-check"></i> Optimizer</a>
+          <a href="/profile"><i data-lucide="user-round"></i> Profile</a>
+        </nav>
+        <div class="side-card">
+          <span>Current Symbol</span>
+          <strong id="sideSymbol">-</strong>
+          <small id="sideMeta">Waiting for run</small>
+        </div>
+      </aside>
+
+      <main class="content">
+        <header class="topbar">
+          <div>
+            <p>Personal Backtesting Dashboard</p>
+            <h1>Crypto Breakout Analysis</h1>
+            <div id="historyInfo" class="history-info">
+              <span class="material-symbols-outlined">database</span>
+              <strong>History:</strong>
+              <span>Checking MT5 data...</span>
+            </div>
+          </div>
+          <div class="top-actions">
+            <div class="user-chip">
+              <span>Signed in as</span>
+              <strong id="signedInUser">...</strong>
+            </div>
+            <button id="exportExcelBtn" class="secondary-btn" type="button">
+              <i data-lucide="download"></i>
+              Export Excel
+            </button>
+            <button id="runBtn" class="primary-btn" type="button">
+              <i data-lucide="play"></i>
+              Run Backtest
+            </button>
+            <button id="logoutBtn" class="secondary-btn" type="button">
+              <i data-lucide="log-out"></i>
+              Log out
+            </button>
+          </div>
+        </header>
+
+        <section id="setup" class="panel setup-panel">
+          <div class="panel-title">
+            <div>
+              <h2>Strategy Setup</h2>
+              <p>Select script, timeframe, date range, entry range and risk settings.</p>
+            </div>
+            <span id="statusPill" class="status-pill">Ready</span>
+          </div>
+
+          <form id="backtestForm" class="form-grid">
+            <label>
+              <span>Data Source</span>
+              <select id="dataSourceInput" name="data_source"></select>
+            </label>
+            <label>
+              <span>Script / Symbol</span>
+              <div class="symbol-combo">
+                <input id="symbolInput" name="symbol" autocomplete="off" placeholder="Search symbol..." required />
+                <div id="symbolMenu" class="symbol-menu"></div>
+              </div>
+            </label>
+            <label>
+              <span>Entry Candle Timeframe</span>
+              <select id="timeframeInput" name="timeframe"></select>
+            </label>
+            <label>
+              <span>+700 Exit Trail Candle Timeframe</span>
+              <select id="trailTimeframeInput" name="trail_timeframe"></select>
+            </label>
+            <label>
+              <span>Entry Pattern</span>
+              <select id="entryPatternInput" name="entry_pattern">
+                <option value="BOTH" selected>Both</option>
+                <option value="BUY_ONLY">Buy only</option>
+                <option value="SELL_ONLY">Sell only</option>
+              </select>
+            </label>
+            <label>
+              <span>From Date</span>
+              <input id="fromDateInput" name="from_date" type="date" required />
+            </label>
+            <label>
+              <span>To Date</span>
+              <input id="toDateInput" name="to_date" type="date" required />
+            </label>
+            <label>
+              <span>Range Start IST</span>
+              <input name="range_start" type="time" value="08:30" required />
+            </label>
+            <label>
+              <span>Range End IST</span>
+              <input name="range_end" type="time" value="09:30" required />
+            </label>
+            <label>
+              <span>Session Start IST</span>
+              <input name="session_start" type="time" value="09:30" required />
+            </label>
+            <label>
+              <span>Last Entry Time IST</span>
+              <input name="entry_cutoff" type="time" value="18:00" required />
+            </label>
+            <label>
+              <span>Force Exit Time IST</span>
+              <input name="session_end" type="time" value="19:30" required />
+            </label>
+            <label>
+              <span>Entry Buffer % <button class="info-btn" type="button" title="Range high ke upar ya range low ke neeche extra safety gap. Example 0.05 means 0.05 percent.">?</button></span>
+              <input name="entry_buffer_pct" type="number" value="0.05" step="0.01" min="0" />
+            </label>
+            <label>
+              <span>Stop Loss <button class="info-btn" type="button" title="Initial SL points distance. BUY me entry price minus stop loss; SELL me entry price plus stop loss. Example: entry 100000 and stop 750 means BUY SL 99250, SELL SL 100750.">?</button></span>
+              <input name="stop_points" type="number" value="400" step="1" min="0" />
+            </label>
+            <label>
+              <span>Trail After Profit <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai.">?</button></span>
+              <input name="first_trail_profit" type="number" value="400" step="1" min="0" />
+            </label>
+            <label>
+              <span>Trail SL Lock <button class="info-btn" type="button" title="First trail active hone ke baad stop loss entry se kitne points door lock hoga.">?</button></span>
+              <input name="first_trail_lock_loss" type="number" value="300" step="1" min="0" />
+            </label>
+          </form>
+          <div class="data-note">
+            <span class="material-symbols-outlined">info</span>
+            <p id="dataNoteText">Backtest uses only candles available in your local MT5 terminal.</p>
+          </div>
+        </section>
+
+        <section id="optimizer" class="panel optimizer-panel">
+          <div class="panel-title">
+            <div>
+              <h2>Strategy Optimizer</h2>
+              <p>Scan timeframe and risk combinations until the target win rate is found.</p>
+            </div>
+            <span id="optimizerStatusPill" class="status-pill">Ready</span>
+          </div>
+          <form id="optimizerForm" class="optimizer-grid">
+            <label class="optimizer-picker-label">
+              <span>Entry Timeframes</span>
+              <input id="optimizerEntryTimeframes" name="entry_timeframes" type="hidden" value="M5,M10,M15,M30,H1" />
+              <div id="optimizerEntryTimeframePicker" class="value-picker"></div>
+            </label>
+            <label class="optimizer-picker-label">
+              <span>Exit Trail Timeframes</span>
+              <input id="optimizerTrailTimeframes" name="trail_timeframes" type="hidden" value="M5,M10,M15,M30,H1" />
+              <div id="optimizerTrailTimeframePicker" class="value-picker"></div>
+            </label>
+            <label class="optimizer-picker-label">
+              <span>Entry Pattern Values</span>
+              <input id="optimizerEntryPatterns" name="entry_patterns" type="hidden" value="BOTH" />
+              <div id="optimizerPatternPicker" class="value-picker"></div>
+            </label>
+            <div class="optimizer-timing-group">
+              <label class="optimizer-time-picker">
+                <span>1H Range Start Values</span>
+                <input id="optimizerRangeStarts" name="range_start_values" type="hidden" value="08:30,00:30,02:30,04:30,06:30,10:30,12:00,12:30,14:30,16:30" />
+                <div id="optimizerRangeStartPicker" class="value-picker"></div>
+                <button id="optimizerRangeStart24Btn" class="preset-btn" type="button">24h</button>
+                <div class="value-add-row">
+                  <input id="optimizerRangeStartAddInput" type="time" value="16:30" aria-label="Add range start time" />
+                  <button id="optimizerRangeStartAddBtn" class="mini-add-btn" type="button">
+                    <i data-lucide="plus"></i>
+                    Add
+                  </button>
+                </div>
+              </label>
+              <label class="optimizer-time-picker">
+                <span>Last Entry Values <button class="info-btn" type="button" title="Is time ke baad new trade entry allowed nahi hogi.">?</button></span>
+                <input id="optimizerEntryCutoffs" name="entry_cutoff_values" type="hidden" value="" />
+                <div id="optimizerEntryCutoffPicker" class="value-picker"></div>
+                <div class="value-add-row">
+                  <input id="optimizerEntryCutoffAddInput" type="time" value="17:00" aria-label="Add last entry time" />
+                  <button id="optimizerEntryCutoffAddBtn" class="mini-add-btn" type="button">
+                    <i data-lucide="plus"></i>
+                    Add
+                  </button>
+                </div>
+              </label>
+              <label class="optimizer-time-picker">
+                <span>Force Exit Values <button class="info-btn" type="button" title="Agar trade is time tak open hai to software usko close kar dega.">?</button></span>
+                <input id="optimizerSessionEnds" name="session_end_values" type="hidden" value="19:30" />
+                <div id="optimizerSessionEndPicker" class="value-picker"></div>
+                <button id="optimizerSessionEnd24Btn" class="preset-btn" type="button">24h</button>
+                <div class="value-add-row">
+                  <input id="optimizerSessionEndAddInput" type="time" value="20:00" aria-label="Add force exit time" />
+                  <button id="optimizerSessionEndAddBtn" class="mini-add-btn" type="button">
+                    <i data-lucide="plus"></i>
+                    Add
+                  </button>
+                </div>
+              </label>
+            </div>
+            <label>
+              <span>Entry Buffer % Values <button class="info-btn" type="button" title="Range high/low ke baad extra breakout gap. Comma-separated values optimizer test karega. Example 0.20 means 0.20 percent buffer.">?</button></span>
+              <input name="entry_buffer_values" value="0.05,0.20,0.25" placeholder="0.05,0.20,0.25" />
+            </label>
+            <label>
+              <span>Stop Loss Values <button class="info-btn" type="button" title="Comma-separated initial SL point distances. Optimizer har value test karega. Example 750 means BUY entry se 750 points neeche SL, SELL entry se 750 points upar SL.">?</button></span>
+              <input name="stop_points_values" value="400,500,300,200" placeholder="400,500,300,200" />
+            </label>
+            <label>
+              <span>First Trail Profit Values <button class="info-btn" type="button" title="Trade itne points profit me aate hi first trailing SL activate hota hai. Har comma-separated value separately test hogi.">?</button></span>
+              <input name="first_trail_profit_values" value="700,600,500" placeholder="700,600,500" />
+            </label>
+            <label>
+              <span>First Trail Lock Values <button class="info-btn" type="button" title="First trail active hone ke baad SL entry ke opposite side kitne points par lock hoga. Example BUY me entry minus lock; SELL me entry plus lock.">?</button></span>
+              <input name="first_trail_lock_values" value="300,400,200" placeholder="300,400,200" />
+            </label>
+            <label>
+              <span>Target Win Rate % <button class="info-btn" type="button" title="Optimizer setting ko qualified tab maanega jab win rate is percentage ke barabar ya upar ho.">?</button></span>
+              <input name="target_win_rate" type="number" value="70" min="0" max="100" step="0.01" />
+            </label>
+            <label>
+              <span>Minimum Trades <button class="info-btn" type="button" title="Setting tabhi qualified hogi jab isse kam se kam itne trades milein. Ye small-sample false results avoid karta hai.">?</button></span>
+              <input name="minimum_trades" type="number" value="20" min="1" step="1" />
+            </label>
+            <label>
+              <span>Maximum Tests <button class="info-btn" type="button" title="Safety limit: selected combinations is number se zyada hue to scan start nahi hoga. Bade scans ke liye value badha sakte ho; max 2,000,000.">?</button></span>
+              <input name="max_combinations" type="number" value="500000" min="1" max="2000000" step="1" />
+            </label>
+            <label>
+              <span>Best Result By <button class="info-btn" type="button" title="Optimizer top results ko is priority se sort karega. Balanced me qualified, win rate, net points, trades ka mix use hota hai.">?</button></span>
+              <select name="result_sort">
+                <option value="BALANCED" selected>Balanced best</option>
+                <option value="WIN_RATE">Highest win %</option>
+                <option value="NET_POINTS">Highest net points</option>
+                <option value="LOWEST_TRADES">Lowest trades</option>
+                <option value="WIN_POINTS">Highest win % + points</option>
+              </select>
+            </label>
+            <label class="optimizer-check">
+              <input name="stop_on_target" type="checkbox" />
+              <span>Stop scan after a qualifying setting reaches target <button class="info-btn" type="button" title="On hoga to pehli qualified setting milte hi scan stop ho jayega. Off hoga to saare combinations compare honge.">?</button></span>
+            </label>
+            <button id="optimizerRunBtn" class="primary-btn optimizer-run" type="submit">
+              <i data-lucide="scan-search"></i>
+              Start Scan
+            </button>
+          </form>
+          <div class="optimizer-note">
+            Fast scan engine reuses candles per timeframe and evaluates large parameter batches in optimized numeric loops. Add comma-separated values to broaden the search.
+          </div>
+          <div id="optimizerProgress" class="optimizer-progress" hidden>
+            <div class="optimizer-progress-head">
+              <strong id="optimizerProgressText">Preparing scan...</strong>
+              <span id="optimizerProgressValue">0%</span>
+            </div>
+            <div class="progress-track"><span id="optimizerProgressBar"></span></div>
+          </div>
+          <div id="optimizerSummary" class="optimizer-summary"></div>
+          <div class="optimizer-result-tools">
+            <p id="optimizerResultMeta"></p>
+            <div class="optimizer-saved-tools">
+              <select id="optimizerScanSelect" class="optimizer-scan-select" aria-label="Saved optimizer scans">
+                <option value="">No saved scans</option>
+              </select>
+              <button id="optimizerExportBtn" class="secondary-btn" type="button" hidden>Export Full Scan CSV</button>
+            </div>
+          </div>
+          <div class="table-wrap optimizer-table-wrap">
+            <table class="optimizer-table">
+              <thead>
+                <tr>
+                  <th><button class="sort-btn optimizer-sort-btn active" data-optimizer-sort="rank" type="button">Rank <span>ASC</span></button></th>
+                  <th><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="entry_pattern" type="button">Pattern <span></span></button></th>
+                  <th><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="timeframe" type="button">Entry / Trail TF <span></span></button></th>
+                  <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="win_rate_pct" type="button">Win Rate <span></span></button></th>
+                  <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="total_trades" type="button">Trades <span></span></button></th>
+                  <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="net_points" type="button">Net Points <span></span></button></th>
+                  <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="avg_points" type="button">Avg / Trade <span></span></button></th>
+                  <th><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="settings" type="button">Settings <span></span></button></th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="optimizerRows">
+                <tr><td class="empty" colspan="9">Start a scan to compare strategy settings.</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="analytics" class="metric-grid"></section>
+
+        <section class="dashboard-grid">
+          <div class="panel" id="ratios">
+            <div class="panel-title compact">
+              <div>
+                <h2>Trade Analytics</h2>
+                <p>Profit/loss split and max trade values.</p>
+              </div>
+            </div>
+            <div class="analytics-wrap">
+              <canvas id="tradeChart" width="420" height="260"></canvas>
+              <div id="analyticsList" class="analytics-list"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-title compact">
+              <div>
+                <h2>Ratios</h2>
+                <p>Performance quality checks.</p>
+              </div>
+            </div>
+            <div id="ratioGrid" class="ratio-grid"></div>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-title table-title">
+            <div>
+              <h2>Points Breakdown</h2>
+              <p id="pointsMeta">Daily, monthly and yearly net points from trade records.</p>
+            </div>
+            <div class="points-controls">
+              <div class="segmented">
+                <button class="points-mode active" data-points-mode="day" type="button">Day</button>
+                <button class="points-mode" data-points-mode="month" type="button">Month</button>
+                <button class="points-mode" data-points-mode="year" type="button">Year</button>
+              </div>
+              <select id="pointsPresetInput" class="chart-window-select">
+                <option value="30" selected>Last 30</option>
+                <option value="60">Last 60</option>
+                <option value="90">Last 90</option>
+                <option value="365">Last 1Y</option>
+                <option value="all">All</option>
+                <option value="custom">Custom</option>
+              </select>
+              <input id="pointsFromInput" class="points-date" type="date" />
+              <input id="pointsToInput" class="points-date" type="date" />
+            </div>
+          </div>
+          <div id="pointsSummary" class="points-summary"></div>
+          <div class="points-wrap">
+            <canvas id="pointsChart" width="1300" height="320"></canvas>
+            <div id="pointsTooltip" class="points-tooltip"></div>
+          </div>
+        </section>
+        <div id="infoTooltip" class="info-tooltip" role="tooltip"></div>
+
+        <section id="chartPanel" class="panel">
+          <div class="panel-title table-title">
+            <div>
+              <h2>Trade Candle Charts</h2>
+              <p id="chartMeta">Click any trade row to compare entry and exit-trail candles.</p>
+            </div>
+            <div class="chart-controls">
+              <div class="segmented">
+                <button id="chartDayBtn" class="chart-mode active" data-chart-mode="day" type="button">Trade Day</button>
+                <button id="chartWindowBtn" class="chart-mode" data-chart-mode="window" type="button">Window</button>
+              </div>
+              <button id="prevChartBtn" class="ghost-btn" type="button">Prev</button>
+              <select id="chartWindowInput" class="chart-window-select">
+                <option value="3">3 Days</option>
+                <option value="7" selected>7 Days</option>
+                <option value="14">14 Days</option>
+                <option value="30">30 Days</option>
+              </select>
+              <button id="nextChartBtn" class="ghost-btn" type="button">Next</button>
+              <label class="height-control">
+                <span>Height</span>
+                <input id="chartHeightInput" type="range" min="320" max="760" step="20" value="430" />
+              </label>
+              <div class="zoom-controls" aria-label="Candle chart zoom controls">
+                <button id="zoomOutChartBtn" class="zoom-btn" type="button" aria-label="Zoom out candles">-</button>
+                <button id="zoomInChartBtn" class="zoom-btn" type="button" aria-label="Zoom in candles">+</button>
+                <button id="fitChartBtn" class="ghost-btn" type="button">Fit</button>
+              </div>
+            </div>
+          </div>
+          <div class="chart-tags">
+            <span class="tag range">08:30-09:30 IST Range</span>
+            <label class="flag-toggle entry">
+              <input id="showEntryFlagInput" type="checkbox" />
+              <span>Show Entry Flag</span>
+            </label>
+            <label class="flag-toggle exit">
+              <input id="showExitFlagInput" type="checkbox" />
+              <span>Show Exit Flag</span>
+            </label>
+          </div>
+          <div class="candle-chart-grid">
+            <article class="candle-card">
+              <div class="candle-card-title">
+                <h3>Entry Candle Chart</h3>
+                <span id="entryChartTimeframe">-</span>
+              </div>
+              <div class="chart-shell">
+                <div id="entryCandleChart" class="candle-chart"></div>
+                <div id="entryChartOverlay" class="chart-overlay">Loading chart...</div>
+              </div>
+            </article>
+            <article class="candle-card">
+              <div class="candle-card-title">
+                <h3>Exit Trail Candle Chart</h3>
+                <span id="exitChartTimeframe">-</span>
+              </div>
+              <div class="chart-shell">
+                <div id="exitCandleChart" class="candle-chart"></div>
+                <div id="exitChartOverlay" class="chart-overlay">Loading chart...</div>
+              </div>
+            </article>
+          </div>
+        </section>
+
+        <section id="records" class="panel">
+          <div class="panel-title table-title">
+            <div>
+              <h2>Trade Records</h2>
+              <p id="recordCount">No records loaded</p>
+            </div>
+            <div class="table-tools">
+              <div class="segmented">
+                <button class="filter-btn active" data-filter="ALL" type="button">All</button>
+                <button class="filter-btn" data-filter="BUY" type="button">Buy</button>
+                <button class="filter-btn" data-filter="SELL" type="button">Sell</button>
+              </div>
+              <input id="searchInput" type="search" placeholder="Search records" />
+              <button id="loadMoreTradesBtn" class="ghost-btn" type="button" hidden>Load More</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th><button class="sort-btn active" data-sort="trade_date" type="button">Date <span>↑</span></button></th>
+                  <th><button class="sort-btn" data-sort="side" type="button">Side <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="range_high" type="button">Range High <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="range_low" type="button">Range Low <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="entry_price" type="button">Entry <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="exit_price" type="button">Exit <span></span></button></th>
+                  <th><button class="sort-btn" data-sort="exit_reason" type="button">Exit Rule <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="pnl_points" type="button">P&L <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="mfe_points" type="button">MFE <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="mae_points" type="button">MAE <span></span></button></th>
+                </tr>
+              </thead>
+              <tbody id="tradeRows"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="report_data.js"></script>
+    <script>
+      let report = null;
+      let activeFilter = "ALL";
+      let searchText = "";
+      let sortState = { key: "trade_date", direction: "asc" };
+      let selectedTrade = null;
+      let entryCandleChart = null;
+      let exitCandleChart = null;
+      let chartMode = "day";
+      let chartWindowStart = null;
+      let availableSymbols = [];
+      let pointsMode = "day";
+      let pointsRange = { preset: "30", from: null, to: null };
+      let pointsChartState = { bars: [], zeroY: 0, plot: null, data: [] };
+      let historyInfo = null;
+      let sourceTimeframes = { MT5: ["M1", "M2", "M3", "M4", "M5", "M10", "M15", "M30", "H1", "H4"], DELTA: ["M1", "M3", "M5", "M15", "M30", "H1", "H4"] };
+      let historyRequestId = 0;
+      let backtestRequestId = 0;
+      let chartRequestId = 0;
+      let optimizerPollTimer = null;
+      let optimizerResults = [];
+      let activeOptimizerScan = null;
+      let optimizerSortState = { key: "rank", direction: "asc" };
+      let tradeRowsLimit = 100;
+      let csrfToken = "";
+      const TRADE_ROWS_BATCH = 100;
+
+      const initialReport = window.BACKTEST_REPORT || null;
+      const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:5000" : "";
+      const fmt = (value) => {
+        if (value === null || value === undefined || value === "-") return "-";
+        const number = Number(value);
+        return Number.isNaN(number) ? String(value) : number.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+      };
+      const tone = (value) => (Number(value) >= 0 ? "positive" : "negative");
+      const timeOnly = (value) => value ? new Date(value).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false }) : "-";
+      const exitLabel = (reason) => ({
+        INITIAL_SL: "Initial SL",
+        FIRST_TRAIL_SL: "First Trail SL",
+        TWO_CANDLE_TRAIL_SL: "2-Candle Trail SL",
+        FORCE_EXIT: "Force Exit (Time)",
+        SESSION_CLOSE: "Force Exit (Time)",
+        DATA_END: "Data End",
+        SL: "SL (Old Result)",
+      }[reason] || reason || "-");
+
+      function closeInfoTooltip() {
+        document.getElementById("infoTooltip")?.classList.remove("open");
+      }
+
+      function showInfoTooltip(button) {
+        const tooltip = document.getElementById("infoTooltip");
+        const text = button.getAttribute("title") || button.dataset.info || "";
+        if (!tooltip || !text) return;
+        tooltip.textContent = text;
+        tooltip.classList.add("open");
+
+        const buttonRect = button.getBoundingClientRect();
+        const tooltipRect = tooltip.getBoundingClientRect();
+        const gap = 8;
+        const left = Math.min(
+          Math.max(12, buttonRect.left + buttonRect.width / 2 - tooltipRect.width / 2),
+          window.innerWidth - tooltipRect.width - 12
+        );
+        const below = buttonRect.bottom + gap;
+        const top = below + tooltipRect.height <= window.innerHeight - 12
+          ? below
+          : Math.max(12, buttonRect.top - tooltipRect.height - gap);
+        tooltip.style.left = `${left}px`;
+        tooltip.style.top = `${top}px`;
+      }
+
+      function initInfoButtons() {
+        document.querySelectorAll(".info-btn").forEach((button) => {
+          button.setAttribute("aria-label", button.getAttribute("title") || "More information");
+          button.addEventListener("click", (event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            const tooltip = document.getElementById("infoTooltip");
+            if (tooltip?.classList.contains("open") && tooltip.textContent === button.getAttribute("title")) {
+              closeInfoTooltip();
+              return;
+            }
+            showInfoTooltip(button);
+          });
+        });
+        document.addEventListener("click", closeInfoTooltip);
+        document.addEventListener("keydown", (event) => {
+          if (event.key === "Escape") closeInfoTooltip();
+        });
+        window.addEventListener("resize", closeInfoTooltip);
+        window.addEventListener("scroll", closeInfoTooltip, true);
+      }
+
+      function setStatus(text, state = "ready") {
+        const pill = document.getElementById("statusPill");
+        pill.textContent = text;
+        pill.dataset.state = state;
+      }
+
+      async function readJson(response) {
+        const text = await response.text();
+        if (!text.trim()) {
+          throw new Error("Server returned empty response. Please refresh or restart python server.py.");
+        }
+        try {
+          return JSON.parse(text);
+        } catch {
+          throw new Error("Server returned invalid response. Please use http://127.0.0.1:5000, not direct file open.");
+        }
+      }
+
+      async function apiJson(url, options) {
+        const requestOptions = { ...(options || {}) };
+        requestOptions.headers = { ...(requestOptions.headers || {}) };
+        requestOptions.credentials = "include";
+        if (csrfToken && requestOptions.method && !["GET", "HEAD"].includes(requestOptions.method.toUpperCase())) {
+          requestOptions.headers["X-CSRF-Token"] = csrfToken;
+        }
+        let response;
+        try {
+          response = await fetch(`${API_BASE}${url}`, requestOptions);
+        } catch {
+          throw new Error("Server connection failed. Open http://127.0.0.1:5000 and make sure python server.py is running.");
+        }
+        if (response.status === 401) {
+          window.location.href = "/login";
+          throw new Error("Your session expired. Please sign in again.");
+        }
+        const data = await readJson(response);
+        if (!response.ok) {
+          throw new Error(data.error || `Request failed: ${response.status}`);
+        }
+        return data;
+      }
+
+      async function loadSession() {
+        const auth = await apiJson("/api/session");
+        csrfToken = auth.csrf_token;
+        document.getElementById("signedInUser").textContent = auth.username;
+      }
+
+      function fillFormFromReport() {
+        if (!report?.config) return;
+        const cfg = report.config;
+        document.getElementById("dataSourceInput").value = cfg.data_source || "MT5";
+        updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M5");
+        fillOptimizerTimeframes();
+        document.getElementById("symbolInput").value = cfg.symbol || "BTCUSDc";
+        document.getElementById("timeframeInput").value = cfg.timeframe || "M5";
+        document.getElementById("trailTimeframeInput").value = cfg.trail_timeframe || cfg.timeframe || "M5";
+        document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
+        document.getElementById("fromDateInput").value = cfg.from_date || "";
+        document.getElementById("toDateInput").value = cfg.to_date || "";
+        const values = {
+          range_start: cfg.range_start || "08:30",
+          range_end: cfg.range_end || "09:30",
+          session_start: cfg.session_start || "09:30",
+          entry_cutoff: cfg.entry_cutoff || "18:00",
+          session_end: cfg.session_end || "19:30",
+          entry_buffer_pct: cfg.entry_buffer_pct ?? 0.05,
+          stop_points: cfg.stop_points ?? 400,
+          first_trail_profit: cfg.first_trail_profit ?? 400,
+          first_trail_lock_loss: cfg.first_trail_lock_loss ?? 300,
+          second_trail_profit: cfg.second_trail_profit ?? 700,
+        };
+        Object.entries(values).forEach(([name, value]) => {
+          const input = document.querySelector(`[name="${name}"]`);
+          if (input) input.value = value;
+        });
+      }
+
+      async function loadDefaults() {
+        const defaults = await apiJson("/api/defaults").catch(() => null);
+        sourceTimeframes = defaults?.source_timeframes || sourceTimeframes;
+        const sources = defaults?.sources || [
+          { value: "MT5", label: "MetaTrader 5 (Local)" },
+          { value: "DELTA", label: "Delta Exchange India (Online Cache)" },
+        ];
+        document.getElementById("dataSourceInput").innerHTML =
+          sources.map((item) => `<option value="${item.value}">${item.label}</option>`).join("");
+        if (defaults) {
+          document.getElementById("fromDateInput").value = defaults.from_date;
+          document.getElementById("toDateInput").value = defaults.to_date;
+          document.getElementById("dataSourceInput").value = defaults.defaults.data_source || "MT5";
+          updateTimeframeOptions(defaults.defaults.timeframe, defaults.defaults.trail_timeframe || defaults.defaults.timeframe);
+          document.getElementById("entryPatternInput").value = defaults.defaults.entry_pattern || "BOTH";
+        } else {
+          updateTimeframeOptions("M5", "M5");
+        }
+        fillOptimizerTimeframes();
+      }
+
+      function updateTimeframeOptions(entryValue, trailValue) {
+        const source = document.getElementById("dataSourceInput").value || "MT5";
+        const timeframes = sourceTimeframes[source] || sourceTimeframes.MT5;
+        document.getElementById("timeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
+        document.getElementById("trailTimeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
+        document.getElementById("timeframeInput").value = timeframes.includes(entryValue) ? entryValue : "M5";
+        document.getElementById("trailTimeframeInput").value = timeframes.includes(trailValue) ? trailValue : "M5";
+      }
+
+      function renderValuePicker(containerId, inputId, options, selectedValues, settings = {}) {
+        const input = document.getElementById(inputId);
+        const container = document.getElementById(containerId);
+        const selected = new Set(selectedValues.filter((item) => options.includes(item)));
+        if (!settings.allowEmpty && !selected.size && options.length) selected.add(options[0]);
+        input.value = options.filter((item) => selected.has(item)).join(",");
+        container.innerHTML = options.map((item) => `
+          <label>
+            <input type="checkbox" value="${item}" ${selected.has(item) ? "checked" : ""} />
+            <span>${item}</span>
+          </label>
+        `).join("");
+        container.querySelectorAll("input").forEach((checkbox) => {
+          checkbox.addEventListener("change", () => {
+            syncValuePicker(container, input, checkbox, settings);
+          });
+        });
+      }
+
+      function syncValuePicker(container, input, fallbackCheckbox = null, settings = {}) {
+        const values = Array.from(container.querySelectorAll("input:checked")).map((item) => item.value);
+        if (!settings.allowEmpty && !values.length && fallbackCheckbox) {
+          fallbackCheckbox.checked = true;
+          values.push(fallbackCheckbox.value);
+        }
+        input.value = values.join(",");
+      }
+
+      function addValuePickerItem(containerId, inputId, value) {
+        const container = document.getElementById(containerId);
+        const input = document.getElementById(inputId);
+        if (!container || !input || !value) return;
+        const existing = Array.from(container.querySelectorAll("input")).find((item) => item.value === value);
+        if (existing) {
+          existing.checked = true;
+          syncValuePicker(container, input, existing);
+          return;
+        }
+        const label = document.createElement("label");
+        label.innerHTML = `
+          <input type="checkbox" value="${value}" checked />
+          <span>${value}</span>
+        `;
+        const checkbox = label.querySelector("input");
+        checkbox.addEventListener("change", () => syncValuePicker(container, input, checkbox));
+        container.appendChild(label);
+        syncValuePicker(container, input, checkbox);
+      }
+
+      function hourlyTimes() {
+        return Array.from({ length: 24 }, (_, hour) => `${String(hour).padStart(2, "0")}:00`);
+      }
+
+      function setValuePickerItems(containerId, inputId, values) {
+        const container = document.getElementById(containerId);
+        const input = document.getElementById(inputId);
+        if (!container || !input) return;
+        container.innerHTML = values.map((value) => `
+          <label>
+            <input type="checkbox" value="${value}" checked />
+            <span>${value}</span>
+          </label>
+        `).join("");
+        container.querySelectorAll("input").forEach((checkbox) => {
+          checkbox.addEventListener("change", () => syncValuePicker(container, input, checkbox));
+        });
+        input.value = values.join(",");
+      }
+
+      function fillOptimizerTimeframes() {
+        const source = document.getElementById("dataSourceInput").value || "MT5";
+        const timeframes = sourceTimeframes[source] || sourceTimeframes.MT5;
+        const scanDefaults = ["M5", "M10", "M15", "M30", "H1"];
+        const entryDefaults = scanDefaults.filter((item) => timeframes.includes(item));
+        const trailDefaults = scanDefaults.filter((item) => timeframes.includes(item));
+        renderValuePicker("optimizerEntryTimeframePicker", "optimizerEntryTimeframes", timeframes, entryDefaults);
+        renderValuePicker("optimizerTrailTimeframePicker", "optimizerTrailTimeframes", timeframes, trailDefaults);
+        renderValuePicker(
+          "optimizerPatternPicker",
+          "optimizerEntryPatterns",
+          ["BUY_ONLY", "BOTH", "SELL_ONLY"],
+          ["BOTH"]
+        );
+        renderValuePicker(
+          "optimizerRangeStartPicker",
+          "optimizerRangeStarts",
+          ["08:30", "00:30", "02:30", "04:30", "06:30", "10:30", "12:00", "12:30", "14:30", "16:30"],
+          ["08:30", "00:30", "02:30", "04:30", "06:30", "10:30", "12:00", "12:30", "14:30", "16:30"]
+        );
+        renderValuePicker(
+          "optimizerEntryCutoffPicker",
+          "optimizerEntryCutoffs",
+          ["15:00", "16:00", "17:00", "18:00"],
+          [],
+          { allowEmpty: true }
+        );
+        renderValuePicker(
+          "optimizerSessionEndPicker",
+          "optimizerSessionEnds",
+          ["18:00", "18:30", "19:00", "19:30", "20:00"],
+          ["18:00", "18:30", "19:00", "19:30", "20:00"]
+        );
+      }
+
+      async function loadSymbols() {
+        try {
+          const source = document.getElementById("dataSourceInput").value || "MT5";
+          const symbols = await apiJson(`/api/symbols?${new URLSearchParams({ source }).toString()}`);
+          if (Array.isArray(symbols)) {
+            availableSymbols = symbols;
+            if (!document.getElementById("symbolInput").value) {
+              const preferred = source === "DELTA" ? "BTCUSD" : "BTCUSDc";
+              document.getElementById("symbolInput").value = symbols.includes(preferred) ? preferred : symbols[0] || "";
+            }
+            renderSymbolMenu();
+          }
+        } catch {
+          if (!document.getElementById("symbolInput").value) {
+            document.getElementById("symbolInput").value =
+              (document.getElementById("dataSourceInput").value || "MT5") === "DELTA" ? "BTCUSD" : "BTCUSDc";
+          }
+        }
+      }
+
+      async function loadHistoryInfo() {
+        const requestId = ++historyRequestId;
+        const source = document.getElementById("dataSourceInput").value || "MT5";
+        const symbol = document.getElementById("symbolInput").value || "BTCUSDc";
+        const entryTimeframe = document.getElementById("timeframeInput").value || "M5";
+        const trailTimeframe = document.getElementById("trailTimeframeInput").value || entryTimeframe;
+        const fromDate = document.getElementById("fromDateInput").value;
+        const toDate = document.getElementById("toDateInput").value;
+        const el = document.getElementById("historyInfo");
+        el.querySelector("span:last-child").textContent = `Checking ${source === "DELTA" ? "Delta" : "MT5"} data...`;
+        try {
+          const entryPromise = apiJson(`/api/history-range?${new URLSearchParams({ source, symbol, timeframe: entryTimeframe, from_date: fromDate, to_date: toDate }).toString()}`);
+          const trailPromise = trailTimeframe === entryTimeframe
+            ? entryPromise
+            : apiJson(`/api/history-range?${new URLSearchParams({ source, symbol, timeframe: trailTimeframe, from_date: fromDate, to_date: toDate }).toString()}`);
+          const [entryResult, trailResult] = await Promise.all([entryPromise, trailPromise]);
+          if (requestId !== historyRequestId) return;
+          historyInfo = { entry: entryResult, trail: trailResult };
+          if (!entryResult.available || !trailResult.available) {
+            const launchText = entryResult.launch_date ? ` Contract launched ${entryResult.launch_date}.` : "";
+            el.querySelector("span:last-child").textContent = `Required candle history not found.${launchText}`;
+            return;
+          }
+          if (source === "DELTA") {
+            el.querySelector("span:last-child").textContent =
+              `Delta ${symbol}: requested ${entryResult.from_date} to ${entryResult.to_date}`;
+            document.getElementById("dataNoteText").textContent =
+              `Delta online candles are downloaded in chunks on Run Backtest and stored locally for faster reruns. Entry uses ${entryTimeframe}; +700 exit trail uses ${trailTimeframe}.`;
+          } else {
+            el.querySelector("span:last-child").textContent =
+              `Entry ${entryTimeframe}: ${entryResult.from_date} to ${entryResult.to_date} | Trail ${trailTimeframe}: ${trailResult.from_date} to ${trailResult.to_date}`;
+            document.getElementById("dataNoteText").textContent =
+              `Local MT5 data: entry candles use ${entryTimeframe}; after +700 points, previous 2 completed ${trailTimeframe} candles set the trail exit.`;
+          }
+        } catch (error) {
+          if (requestId !== historyRequestId) return;
+          if (report?.config?.data_from_date && report?.config?.data_to_date) {
+            el.querySelector("span:last-child").textContent = `${report.config.data_from_date} to ${report.config.data_to_date} (last result)`;
+          } else {
+            el.querySelector("span:last-child").textContent = error.message;
+          }
+        }
+      }
+
+      function renderSymbolMenu() {
+        const input = document.getElementById("symbolInput");
+        const menu = document.getElementById("symbolMenu");
+        const query = input.value.trim().toLowerCase();
+        const matches = availableSymbols
+          .filter((symbol) => !query || symbol.toLowerCase().includes(query))
+          .slice(0, 30);
+        menu.innerHTML = matches.length
+          ? matches.map((symbol) => `<button type="button" data-symbol="${symbol}">${symbol}</button>`).join("")
+          : `<div class="symbol-empty">No symbols found</div>`;
+      }
+
+      function collectForm() {
+        const form = new FormData(document.getElementById("backtestForm"));
+        return Object.fromEntries(form.entries());
+      }
+
+      async function runBacktest() {
+        const btn = document.getElementById("runBtn");
+        const values = collectForm();
+        if (values.entry_cutoff < values.session_start || values.entry_cutoff > values.session_end) {
+          setStatus("Last Entry Time must be between Session Start and Force Exit Time.", "error");
+          return;
+        }
+        const requestId = ++backtestRequestId;
+        btn.disabled = true;
+        setStatus(values.data_source === "DELTA" ? "Downloading/caching Delta candles..." : "Running MT5...", "loading");
+        try {
+          const data = await apiJson("/api/backtest", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(values),
+          });
+          if (requestId !== backtestRequestId) return;
+          report = data;
+          selectedTrade = report.trades?.[0] || null;
+          tradeRowsLimit = TRADE_ROWS_BATCH;
+          resetPointsRange();
+          renderAll();
+          loadChartForSelectedTrade();
+          setStatus("Completed", "ready");
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          btn.disabled = false;
+        }
+      }
+
+      function setOptimizerStatus(text, state = "ready") {
+        const pill = document.getElementById("optimizerStatusPill");
+        pill.textContent = text;
+        pill.dataset.state = state;
+      }
+
+      function optimizerPayload() {
+        const scanValues = Object.fromEntries(new FormData(document.getElementById("optimizerForm")).entries());
+        return {
+          ...collectForm(),
+          ...scanValues,
+          stop_on_target: document.querySelector('[name="stop_on_target"]').checked,
+        };
+      }
+
+      function optimizerSettingsText(row) {
+        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${fmt(row.stop_points)} | Trail ${fmt(row.first_trail_profit)}/${fmt(row.first_trail_lock_loss)}`;
+      }
+
+      function optimizerAveragePoints(row) {
+        const trades = Number(row.total_trades || 0);
+        return trades ? Number(row.net_points || 0) / trades : 0;
+      }
+
+      function optimizerSortValue(row, key) {
+        if (key === "timeframe") return `${row.timeframe || ""}/${row.trail_timeframe || ""}`;
+        if (key === "settings") return optimizerSettingsText(row);
+        if (key === "entry_pattern") return row.entry_pattern || "BOTH";
+        if (key === "avg_points") return optimizerAveragePoints(row);
+        if (["rank", "win_rate_pct", "total_trades", "net_points"].includes(key)) {
+          const value = Number(row[key]);
+          return Number.isFinite(value) ? value : -Infinity;
+        }
+        return row[key] ?? "";
+      }
+
+      function sortedOptimizerResults(rows) {
+        const multiplier = optimizerSortState.direction === "asc" ? 1 : -1;
+        return [...rows].sort((a, b) => {
+          const av = optimizerSortValue(a, optimizerSortState.key);
+          const bv = optimizerSortValue(b, optimizerSortState.key);
+          if (typeof av === "string" || typeof bv === "string") {
+            return String(av).localeCompare(String(bv)) * multiplier;
+          }
+          return (av - bv) * multiplier;
+        });
+      }
+
+      function updateOptimizerSortHeaders() {
+        document.querySelectorAll(".optimizer-sort-btn").forEach((button) => {
+          const isActive = button.dataset.optimizerSort === optimizerSortState.key;
+          button.classList.toggle("active", isActive);
+          button.querySelector("span").textContent = isActive ? (optimizerSortState.direction === "asc" ? "ASC" : "DESC") : "";
+        });
+      }
+
+      function renderOptimizerResults(job) {
+        optimizerResults = sortedOptimizerResults(job.results || []);
+        activeOptimizerScan = job;
+        updateOptimizerSortHeaders();
+        const summary = document.getElementById("optimizerSummary");
+        const outcome = job.status === "running" || job.status === "queued"
+          ? "Running"
+          : job.status === "interrupted"
+            ? "Partial saved"
+            : job.target_found ? "Target found" : "Target not reached";
+        summary.innerHTML = `
+          <div><span>Result</span><strong class="${job.target_found ? "positive" : job.status === "running" || job.status === "queued" ? "" : "negative"}">${outcome}</strong></div>
+          <div><span>Tested</span><strong>${job.tested} / ${job.total}</strong></div>
+          <div><span>Target</span><strong>${fmt(job.target_win_rate)}% / min ${job.minimum_trades} trades</strong></div>
+          <div><span>Elapsed</span><strong>${fmt(job.elapsed_seconds)} sec</strong></div>
+        `;
+        document.getElementById("optimizerRows").innerHTML = optimizerResults.length
+          ? optimizerResults.map((row, index) => `
+              <tr class="${row.qualified ? "optimizer-hit" : ""}">
+                <td><b>#${row.rank}</b>${row.qualified ? `<small class="qualified">Target</small>` : ""}</td>
+                <td><b>${row.entry_pattern || "BOTH"}</b></td>
+                <td><b>${row.timeframe}</b> / ${row.trail_timeframe}</td>
+                <td class="num ${Number(row.win_rate_pct) >= Number(job.target_win_rate) ? "positive" : ""}"><b>${fmt(row.win_rate_pct)}%</b></td>
+                <td class="num">${row.total_trades}<small>${row.wins}W / ${row.losses}L</small></td>
+                <td class="num ${tone(row.net_points)}"><b>${fmt(row.net_points)}</b></td>
+                <td class="num ${tone(optimizerAveragePoints(row))}">${fmt(optimizerAveragePoints(row))} pts</td>
+                <td class="optimizer-settings">
+                  ${optimizerSettingsText(row)}
+                </td>
+                <td><button class="ghost-btn use-optimizer-btn" data-optimizer-index="${index}" type="button">Use & Run</button></td>
+              </tr>
+            `).join("")
+          : `<tr><td class="empty" colspan="9">No scan result available.</td></tr>`;
+        const count = Number(job.result_count ?? optimizerResults.length);
+        const meta = document.getElementById("optimizerResultMeta");
+        meta.textContent = job.results_truncated
+          ? `Showing top ${optimizerResults.length} of ${count} tested settings. Export CSV for the full record.`
+          : `${count} tested settings available.`;
+        const exportButton = document.getElementById("optimizerExportBtn");
+        exportButton.hidden = !count;
+        exportButton.dataset.source = document.getElementById("dataSourceInput").value || "MT5";
+        exportButton.dataset.symbol = job.scan_config?.symbol || document.getElementById("symbolInput").value || "";
+        exportButton.dataset.scanId = job.scan_id || "";
+        const scanSelect = document.getElementById("optimizerScanSelect");
+        if (job.scan_id) {
+          const stamp = job.created_at ? new Date(job.created_at).toLocaleString("en-IN") : "Current scan";
+          const label = `${stamp} | ${job.status || "running"} | ${job.tested || 0}/${job.total || 0}`;
+          const option = Array.from(scanSelect.options).find((item) => item.value === job.scan_id);
+          if (option) {
+            option.textContent = label;
+          } else {
+            scanSelect.insertAdjacentHTML("afterbegin", `<option value="${job.scan_id}">${label}</option>`);
+          }
+          scanSelect.value = job.scan_id;
+        }
+      }
+
+      function optimizerScope() {
+        return {
+          source: document.getElementById("dataSourceInput").value || "MT5",
+          symbol: document.getElementById("symbolInput").value.trim(),
+        };
+      }
+
+      async function openOptimizerScan(scanId) {
+        const scope = optimizerScope();
+        if (!scope.symbol || !scanId) return;
+        const scan = await apiJson(`/api/optimizer/scans/${encodeURIComponent(scanId)}?${new URLSearchParams(scope).toString()}`);
+        renderOptimizerResults(scan);
+        if (scan.status === "running" || scan.status === "queued") {
+          document.getElementById("optimizerRunBtn").disabled = true;
+          document.getElementById("optimizerProgress").hidden = false;
+          setOptimizerStatus("Running scan restored", "loading");
+          pollOptimizerJob(scan.scan_id);
+        } else {
+          document.getElementById("optimizerRunBtn").disabled = false;
+          setOptimizerStatus(scan.status === "interrupted" ? "Saved partial result" : scan.target_found ? "Saved target result" : "Saved scan loaded", scan.target_found ? "ready" : "error");
+        }
+      }
+
+      async function loadLatestOptimizer(preferredScanId = "", options = {}) {
+        const preserveCurrent = Boolean(options.preserveCurrent);
+        const openSelected = options.openSelected !== false;
+        const scope = optimizerScope();
+        const select = document.getElementById("optimizerScanSelect");
+        if (!scope.symbol) return;
+        try {
+          const scans = await apiJson(`/api/optimizer/scans?${new URLSearchParams(scope).toString()}`);
+          if (!scans.length) throw new Error("No optimizer scan result found.");
+          select.innerHTML = scans.map((scan) => {
+            const stamp = scan.created_at ? new Date(scan.created_at).toLocaleString("en-IN") : scan.scan_id;
+            return `<option value="${scan.scan_id}">${stamp} | ${scan.status} | ${scan.tested}/${scan.total}</option>`;
+          }).join("");
+          const preferred = scans.find((scan) => scan.scan_id === preferredScanId);
+          const active = scans.find((scan) => scan.status === "running" || scan.status === "queued");
+          const completed = scans.find((scan) => scan.status === "completed");
+          const selectedId = preferred?.scan_id || active?.scan_id || completed?.scan_id || scans[0].scan_id;
+          select.value = selectedId;
+          if (openSelected) {
+            await openOptimizerScan(selectedId);
+          }
+        } catch {
+          if (preserveCurrent && activeOptimizerScan) {
+            return;
+          }
+          select.innerHTML = `<option value="">No saved scans for ${scope.symbol}</option>`;
+          optimizerResults = [];
+          activeOptimizerScan = null;
+          document.getElementById("optimizerSummary").innerHTML = "";
+          document.getElementById("optimizerResultMeta").textContent = "";
+          document.getElementById("optimizerExportBtn").hidden = true;
+          document.getElementById("optimizerRows").innerHTML =
+            `<tr><td class="empty" colspan="9">Start a scan to compare strategy settings.</td></tr>`;
+          setOptimizerStatus("Ready", "ready");
+        }
+      }
+
+      async function pollOptimizerJob(jobId) {
+        try {
+          const job = await apiJson(`/api/optimizer/jobs/${jobId}`);
+          const progress = Number(job.progress_pct || 0);
+          document.getElementById("optimizerProgressText").textContent = job.message || "Scanning...";
+          document.getElementById("optimizerProgressValue").textContent = `${fmt(progress)}%`;
+          document.getElementById("optimizerProgressBar").style.width = `${Math.min(progress, 100)}%`;
+          if (job.results?.length) renderOptimizerResults(job);
+          if (job.status === "completed") {
+            document.getElementById("optimizerRunBtn").disabled = false;
+            setOptimizerStatus(job.target_found ? "Target found" : "Completed", job.target_found ? "ready" : "error");
+            renderOptimizerResults(job);
+            if (job.target_found && job.results?.[0]) {
+              setOptimizerStatus("Target found; running backtest", "loading");
+              await useOptimizerResult(job.results[0], { scroll: false });
+              setOptimizerStatus("Target found and backtest loaded", "ready");
+            }
+            await loadLatestOptimizer(job.scan_id, { preserveCurrent: true, openSelected: false });
+            return;
+          }
+          if (job.status === "error") {
+            document.getElementById("optimizerRunBtn").disabled = false;
+            setOptimizerStatus(job.message, "error");
+            return;
+          }
+          optimizerPollTimer = window.setTimeout(() => pollOptimizerJob(jobId), 750);
+        } catch (error) {
+          document.getElementById("optimizerRunBtn").disabled = false;
+          setOptimizerStatus(error.message, "error");
+        }
+      }
+
+      async function startOptimizer(event) {
+        event.preventDefault();
+        const btn = document.getElementById("optimizerRunBtn");
+        if (optimizerPollTimer) window.clearTimeout(optimizerPollTimer);
+        btn.disabled = true;
+        setOptimizerStatus("Preparing scan...", "loading");
+        document.getElementById("optimizerProgress").hidden = false;
+        document.getElementById("optimizerProgressBar").style.width = "0%";
+        document.getElementById("optimizerProgressText").textContent = "Preparing scan...";
+        document.getElementById("optimizerProgressValue").textContent = "0%";
+        try {
+          const job = await apiJson("/api/optimizer/start", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(optimizerPayload()),
+          });
+          setOptimizerStatus(job.reused ? "Existing scan is still running" : `Scanning ${job.total} settings`, "loading");
+          renderOptimizerResults({
+            scan_id: job.scan_id,
+            status: "queued",
+            message: "Scan queued...",
+            tested: 0,
+            total: job.total,
+            progress_pct: 0,
+            target_win_rate: Number(document.querySelector('[name="target_win_rate"]').value || 70),
+            minimum_trades: Number(document.querySelector('[name="minimum_trades"]').value || 20),
+            result_sort: document.querySelector('[name="result_sort"]').value || "BALANCED",
+            result_count: 0,
+            results: [],
+          });
+          pollOptimizerJob(job.job_id || job.scan_id);
+        } catch (error) {
+          btn.disabled = false;
+          setOptimizerStatus(error.message, "error");
+        }
+      }
+
+      async function useOptimizerResult(row, options = {}) {
+        document.getElementById("timeframeInput").value = row.timeframe;
+        document.getElementById("trailTimeframeInput").value = row.trail_timeframe;
+        document.getElementById("entryPatternInput").value = row.entry_pattern || row.mode || "BOTH";
+        const values = {
+          range_start: row.range_start || "08:30",
+          range_end: row.range_end || "09:30",
+          session_start: row.session_start || row.range_end || "09:30",
+          entry_cutoff: row.entry_cutoff || "18:00",
+          session_end: row.session_end || "19:30",
+          entry_buffer_pct: row.entry_buffer_pct,
+          stop_points: row.stop_points,
+          first_trail_profit: row.first_trail_profit,
+          first_trail_lock_loss: row.first_trail_lock_loss,
+        };
+        Object.entries(values).forEach(([name, value]) => {
+          const input = document.querySelector(`#backtestForm [name="${name}"]`);
+          if (input) input.value = value;
+        });
+        if (options.scroll !== false) {
+          document.getElementById("setup").scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+        if (options.run !== false) {
+          await runBacktest();
+        }
+      }
+
+      function renderHeader() {
+        if (!report) return;
+        document.getElementById("sideSymbol").textContent = report.config.symbol;
+        document.getElementById("sideMeta").textContent = `${report.config.data_source || "MT5"} | Entry ${report.config.timeframe} | +700 Trail ${report.config.trail_timeframe || report.config.timeframe} | ${report.config.range} | ${report.config.session}`;
+        if (report.config.data_from_date && report.config.data_to_date) {
+          document.getElementById("dataNoteText").textContent =
+            `${report.config.data_source === "DELTA" ? "Delta cached online" : "Local MT5"} data used: ${report.config.data_from_date} to ${report.config.data_to_date}. Entry ${report.config.timeframe}; +700 exit trail ${report.config.trail_timeframe || report.config.timeframe}.`;
+        }
+      }
+
+      function resetPointsRange() {
+        pointsRange = { preset: "30", from: null, to: null };
+        document.getElementById("pointsPresetInput").value = "30";
+      }
+
+      function renderMetrics() {
+        const stats = report?.stats || {};
+        const cards = [
+          ["Net Points", stats.net_points, "trending-up"],
+          ["Trades", stats.total_trades, "list-checks"],
+          ["Win Rate", `${fmt(stats.win_rate_pct)}%`, "target"],
+          ["Avg Profit / Trade", `${fmt(stats.avg_points)} pts`, "activity"],
+          ["Max Profit", stats.max_profit_points, "arrow-up-right"],
+          ["Max Loss", stats.max_loss_points, "arrow-down-right"],
+        ];
+        document.getElementById("analytics").innerHTML = cards.map(([label, value, icon]) => `
+          <article class="metric-card">
+            <i data-lucide="${icon}"></i>
+            <span>${label}</span>
+            <strong class="${typeof value === "number" ? tone(value) : ""}">${typeof value === "number" ? fmt(value) : value}</strong>
+          </article>
+        `).join("");
+      }
+
+      function renderAnalytics() {
+        const stats = report?.stats || {};
+        const items = [
+          ["Profit Trades", stats.wins || 0, "positive"],
+          ["Loss Trades", stats.losses || 0, "negative"],
+          ["Buy Trades", `${stats.buy_trades || 0} / ${fmt(stats.buy_net_points)} pts`, tone(stats.buy_net_points || 0)],
+          ["Sell Trades", `${stats.sell_trades || 0} / ${fmt(stats.sell_net_points)} pts`, tone(stats.sell_net_points || 0)],
+          ["Avg Win", `${fmt(stats.avg_win_points)} pts`, "positive"],
+          ["Avg Loss", `${fmt(stats.avg_loss_points)} pts`, "negative"],
+          ["Initial SL Exits", stats.initial_sl_exits ?? 0, "negative"],
+          ["First Trail SL Exits", stats.first_trail_sl_exits ?? 0, ""],
+          ["2-Candle Trail Exits", stats.two_candle_trail_sl_exits ?? 0, "positive"],
+          ["Force Time Exits", stats.force_exits ?? 0, ""],
+          ["Data End Exits", stats.data_end_exits ?? 0, ""],
+        ];
+        if ((report?.trades || []).some((trade) => trade.exit_reason === "SL")) {
+          items.push(["Old Generic SL (rerun)", (report.trades || []).filter((trade) => trade.exit_reason === "SL").length, ""]);
+        }
+        document.getElementById("analyticsList").innerHTML = items.map(([label, value, cls]) => `
+          <div><span>${label}</span><strong class="${cls}">${value}</strong></div>
+        `).join("");
+        drawTradeChart(stats.wins || 0, stats.losses || 0);
+      }
+
+      function drawTradeChart(wins, losses) {
+        const canvas = document.getElementById("tradeChart");
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        const total = Math.max(wins + losses, 1);
+        const bars = [
+          { label: "Profit", value: wins, color: "#059669" },
+          { label: "Loss", value: losses, color: "#e11d48" },
+        ];
+        bars.forEach((bar, index) => {
+          const x = 62 + index * 150;
+          const h = Math.max((bar.value / total) * 170, 6);
+          ctx.fillStyle = "#e2e8f0";
+          ctx.fillRect(x, 30, 82, 170);
+          ctx.fillStyle = bar.color;
+          ctx.fillRect(x, 200 - h, 82, h);
+          ctx.fillStyle = "#0f172a";
+          ctx.font = "700 16px Inter, system-ui";
+          ctx.fillText(String(bar.value), x + 28, 224);
+          ctx.fillStyle = "#64748b";
+          ctx.font = "12px Inter, system-ui";
+          ctx.fillText(bar.label, x + 22, 244);
+        });
+      }
+
+      function renderRatios() {
+        const stats = report?.stats || {};
+        const ratios = [
+          ["Risk Reward", stats.risk_reward_ratio ?? "-"],
+          ["Avg Points", `${fmt(stats.avg_points)} pts`],
+          ["Drawdown", `${fmt(stats.max_drawdown_points)} pts`],
+          ["Gross Profit", `${fmt(stats.gross_profit_points)} pts`],
+          ["Gross Loss", `${fmt(stats.gross_loss_points)} pts`],
+          ["One Trade/Day", "Enabled"],
+        ];
+        document.getElementById("ratioGrid").innerHTML = ratios.map(([label, value]) => `
+          <div><span>${label}</span><strong>${value}</strong></div>
+        `).join("");
+      }
+
+      function filteredTrades() {
+        const trades = report?.trades || [];
+        const search = searchText.trim().toLowerCase();
+        const rows = trades.filter((trade) => {
+          const sideMatch = activeFilter === "ALL" || trade.side === activeFilter;
+          const text = `${trade.trade_date} ${trade.side} ${trade.exit_reason} ${exitLabel(trade.exit_reason)}`.toLowerCase();
+          return sideMatch && (!search || text.includes(search));
+        });
+        return sortTrades(rows);
+      }
+
+      function sortValue(trade, key) {
+        if (key === "trade_date") return new Date(trade.entry_time || trade.trade_date).getTime();
+        if (key === "side" || key === "exit_reason") return String(trade[key] || "");
+        return Number(trade[key] ?? 0);
+      }
+
+      function sortTrades(rows) {
+        const multiplier = sortState.direction === "asc" ? 1 : -1;
+        return [...rows].sort((a, b) => {
+          const av = sortValue(a, sortState.key);
+          const bv = sortValue(b, sortState.key);
+          if (typeof av === "string" || typeof bv === "string") {
+            return String(av).localeCompare(String(bv)) * multiplier;
+          }
+          return (av - bv) * multiplier;
+        });
+      }
+
+      function updateSortHeaders() {
+        document.querySelectorAll(".sort-btn").forEach((button) => {
+          const isActive = button.dataset.sort === sortState.key;
+          button.classList.toggle("active", isActive);
+          button.querySelector("span").textContent = isActive ? (sortState.direction === "asc" ? "ASC" : "DESC") : "";
+        });
+      }
+
+      function renderTrades() {
+        updateSortHeaders();
+        const rows = filteredTrades();
+        const total = report?.trades?.length || 0;
+        const visibleRows = rows.slice(0, tradeRowsLimit);
+        const loadMoreButton = document.getElementById("loadMoreTradesBtn");
+        document.getElementById("recordCount").textContent =
+          rows.length > visibleRows.length ? `Showing ${visibleRows.length} of ${rows.length} matching records (${total} total)` : `${rows.length} of ${total} records`;
+        loadMoreButton.hidden = visibleRows.length >= rows.length;
+        document.getElementById("tradeRows").innerHTML = visibleRows.length
+          ? visibleRows.map((trade) => `
+              <tr class="${selectedTrade === trade ? "selected-row" : ""}" data-trade-index="${report.trades.indexOf(trade)}">
+                <td><b>${trade.trade_date}</b><small>${timeOnly(trade.entry_time)} to ${timeOnly(trade.exit_time)}</small></td>
+                <td><span class="side ${trade.side.toLowerCase()}">${trade.side}</span></td>
+                <td class="num">${fmt(trade.range_high)}</td>
+                <td class="num">${fmt(trade.range_low)}</td>
+                <td class="num">${fmt(trade.entry_price)}</td>
+                <td class="num">${fmt(trade.exit_price)}</td>
+                <td><span class="reason">${exitLabel(trade.exit_reason)}</span></td>
+                <td class="num ${tone(trade.pnl_points)}"><b>${fmt(trade.pnl_points)}</b></td>
+                <td class="num">${fmt(trade.mfe_points)}</td>
+                <td class="num">${fmt(trade.mae_points)}</td>
+              </tr>
+            `).join("")
+          : `<tr><td class="empty" colspan="10">Run backtest to load records.</td></tr>`;
+      }
+
+      function renderAll() {
+        renderHeader();
+        renderMetrics();
+        renderAnalytics();
+        renderRatios();
+        renderPointsChart();
+        renderTrades();
+        if (window.lucide) lucide.createIcons();
+      }
+
+      function initPointsRange() {
+        const trades = report?.trades || [];
+        if (!trades.length) return;
+        const first = trades[0].trade_date;
+        const last = trades[trades.length - 1].trade_date;
+        const presetDays = Number(pointsRange.preset);
+        pointsRange.to = pointsRange.to || last;
+        pointsRange.from = pointsRange.from || addDays(last, -(presetDays - 1));
+        if (pointsRange.from < first) pointsRange.from = first;
+        document.getElementById("pointsFromInput").value = pointsRange.from;
+        document.getElementById("pointsToInput").value = pointsRange.to;
+      }
+
+      function groupedPoints() {
+        initPointsRange();
+        if (pointsRange.from && pointsRange.to && pointsRange.from > pointsRange.to) {
+          const temp = pointsRange.from;
+          pointsRange.from = pointsRange.to;
+          pointsRange.to = temp;
+          document.getElementById("pointsFromInput").value = pointsRange.from;
+          document.getElementById("pointsToInput").value = pointsRange.to;
+        }
+        const groups = new Map();
+        (report?.trades || [])
+          .filter((trade) => !pointsRange.from || !pointsRange.to || (trade.trade_date >= pointsRange.from && trade.trade_date <= pointsRange.to))
+          .forEach((trade) => {
+          let key = trade.trade_date;
+          if (pointsMode === "month") key = trade.trade_date.slice(0, 7);
+          if (pointsMode === "year") key = trade.trade_date.slice(0, 4);
+          const current = groups.get(key) || { label: key, points: 0, trades: 0 };
+          current.points += Number(trade.pnl_points || 0);
+          current.trades += 1;
+          groups.set(key, current);
+        });
+        return [...groups.values()].sort((a, b) => a.label.localeCompare(b.label));
+      }
+
+      function renderPointsChart() {
+        const canvas = document.getElementById("pointsChart");
+        const ctx = canvas.getContext("2d");
+        const dpr = window.devicePixelRatio || 1;
+        const rect = canvas.getBoundingClientRect();
+        canvas.width = rect.width * dpr;
+        canvas.height = rect.height * dpr;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        const chartWidth = rect.width;
+        const chartHeight = rect.height;
+        const data = groupedPoints();
+        ctx.clearRect(0, 0, chartWidth, chartHeight);
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, chartWidth, chartHeight);
+        document.getElementById("pointsMeta").textContent = `${pointsRange.from || "-"} to ${pointsRange.to || "-"} | ${data.length} ${pointsMode} bars`;
+        renderPointsSummary(data);
+
+        if (!data.length) {
+          ctx.fillStyle = "#64748b";
+          ctx.font = "15px Inter, system-ui";
+          ctx.fillText("No points data loaded", 24, 44);
+          return;
+        }
+
+        const pad = { left: 62, right: 24, top: 24, bottom: 58 };
+        const width = chartWidth - pad.left - pad.right;
+        const height = chartHeight - pad.top - pad.bottom;
+        const maxAbs = Math.max(...data.map((item) => Math.abs(item.points)), 1);
+        const zeroY = pad.top + height / 2;
+        const barGap = pointsMode === "day" ? 4 : 10;
+        const barWidth = Math.max(3, Math.min(46, (width / data.length) - barGap));
+
+        ctx.strokeStyle = "#e2e8f0";
+        ctx.lineWidth = 1;
+        for (let i = -2; i <= 2; i += 1) {
+          const y = zeroY - (i / 2) * (height / 2);
+          ctx.beginPath();
+          ctx.moveTo(pad.left, y);
+          ctx.lineTo(chartWidth - pad.right, y);
+          ctx.stroke();
+        }
+        ctx.strokeStyle = "#94a3b8";
+        ctx.beginPath();
+        ctx.moveTo(pad.left, zeroY);
+        ctx.lineTo(chartWidth - pad.right, zeroY);
+        ctx.stroke();
+
+        data.forEach((item, index) => {
+          const x = pad.left + index * (width / data.length) + ((width / data.length) - barWidth) / 2;
+          const barH = Math.abs(item.points) / maxAbs * (height / 2 - 12);
+          const y = item.points >= 0 ? zeroY - barH : zeroY;
+          ctx.fillStyle = item.points >= 0 ? "#059669" : "#e11d48";
+          ctx.fillRect(x, y, barWidth, Math.max(barH, 1));
+        });
+        pointsChartState = {
+          data,
+          zeroY,
+          plot: { left: pad.left, right: chartWidth - pad.right, top: pad.top, bottom: chartHeight - pad.bottom },
+          bars: data.map((item, index) => {
+            const slot = width / data.length;
+            const x = pad.left + index * slot + (slot - barWidth) / 2;
+            const barH = Math.abs(item.points) / maxAbs * (height / 2 - 12);
+            const y = item.points >= 0 ? zeroY - barH : zeroY;
+            return { item, x, y, width: barWidth, height: Math.max(barH, 1), center: x + barWidth / 2 };
+          }),
+        };
+
+        ctx.fillStyle = "#64748b";
+        ctx.font = "12px Inter, system-ui";
+        const labelStep = data.length <= 31 ? 1 : Math.max(1, Math.ceil(data.length / 14));
+        data.forEach((item, index) => {
+          if (index % labelStep !== 0 && index !== data.length - 1) return;
+          const x = pad.left + index * (width / data.length);
+          ctx.save();
+          ctx.translate(x, chartHeight - 18);
+          ctx.rotate(-Math.PI / 5);
+          ctx.fillText(item.label, 0, 0);
+          ctx.restore();
+        });
+
+        const total = data.reduce((sum, item) => sum + item.points, 0);
+        ctx.fillStyle = total >= 0 ? "#059669" : "#e11d48";
+        ctx.font = "700 14px Inter, system-ui";
+        ctx.fillText(`Net ${fmt(total)} pts`, pad.left, 18);
+      }
+
+      function drawPointsHover(mouseX, mouseY) {
+        renderPointsChart();
+        const canvas = document.getElementById("pointsChart");
+        const ctx = canvas.getContext("2d");
+        const tooltip = document.getElementById("pointsTooltip");
+        const state = pointsChartState;
+        if (!state.bars.length || !state.plot) return;
+
+        const nearest = state.bars.reduce((best, bar) => {
+          const distance = Math.abs(bar.center - mouseX);
+          return !best || distance < best.distance ? { bar, distance } : best;
+        }, null);
+        if (!nearest || nearest.distance > 28) {
+          tooltip.classList.remove("open");
+          return;
+        }
+
+        const bar = nearest.bar;
+        const dpr = window.devicePixelRatio || 1;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.strokeStyle = "#0f172a";
+        ctx.lineWidth = 1;
+        ctx.setLineDash([4, 4]);
+        ctx.beginPath();
+        ctx.moveTo(bar.center, state.plot.top);
+        ctx.lineTo(bar.center, state.plot.bottom);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.moveTo(state.plot.left, mouseY);
+        ctx.lineTo(state.plot.right, mouseY);
+        ctx.stroke();
+        ctx.setLineDash([]);
+
+        ctx.strokeStyle = bar.item.points >= 0 ? "#059669" : "#e11d48";
+        ctx.lineWidth = 2;
+        ctx.strokeRect(bar.x - 2, bar.y - 2, bar.width + 4, bar.height + 4);
+
+        tooltip.innerHTML = `
+          <strong>${bar.item.label}</strong>
+          <span class="${tone(bar.item.points)}">${fmt(bar.item.points)} pts</span>
+          <small>${bar.item.trades} trades</small>
+        `;
+        tooltip.style.left = `${Math.min(bar.center + 14, canvas.clientWidth - 150)}px`;
+        tooltip.style.top = `${Math.max(10, Math.min(mouseY - 46, canvas.clientHeight - 82))}px`;
+        tooltip.classList.add("open");
+      }
+
+      function renderPointsSummary(data) {
+        const net = data.reduce((sum, item) => sum + item.points, 0);
+        const best = data.reduce((max, item) => (item.points > max.points ? item : max), data[0] || { label: "-", points: 0 });
+        const worst = data.reduce((min, item) => (item.points < min.points ? item : min), data[0] || { label: "-", points: 0 });
+        const positive = data.filter((item) => item.points > 0).length;
+        const negative = data.filter((item) => item.points < 0).length;
+        const items = [
+          ["Net", `${fmt(net)} pts`, tone(net)],
+          ["Best", `${best.label} / ${fmt(best.points)} pts`, "positive"],
+          ["Worst", `${worst.label} / ${fmt(worst.points)} pts`, "negative"],
+          ["Bars", `${data.length} total`],
+          ["Positive", positive, "positive"],
+          ["Negative", negative, "negative"],
+        ];
+        document.getElementById("pointsSummary").innerHTML = items.map(([label, value, cls = ""]) => `
+          <div><span>${label}</span><strong class="${cls}">${value}</strong></div>
+        `).join("");
+      }
+
+      function tradeMarkerTime(value) {
+        return new Date(value).getTime();
+      }
+
+      function isoDate(date) {
+        return date.toISOString().slice(0, 10);
+      }
+
+      function addDays(day, amount) {
+        const date = new Date(`${day}T00:00:00Z`);
+        date.setUTCDate(date.getUTCDate() + amount);
+        return isoDate(date);
+      }
+
+      function windowDays() {
+        return Number(document.getElementById("chartWindowInput").value || 7);
+      }
+
+      function clampDate(day) {
+        if (!report?.config) return day;
+        if (day < report.config.from_date) return report.config.from_date;
+        if (day > report.config.to_date) return report.config.to_date;
+        return day;
+      }
+
+      function currentChartWindow() {
+        const days = windowDays();
+        const anchor = chartWindowStart || selectedTrade.trade_date;
+        const from = clampDate(anchor);
+        const to = clampDate(addDays(from, days - 1));
+        return { from, to };
+      }
+
+      async function loadChartForSelectedTrade() {
+        const requestId = ++chartRequestId;
+        const entryOverlay = document.getElementById("entryChartOverlay");
+        const exitOverlay = document.getElementById("exitChartOverlay");
+        const overlays = [entryOverlay, exitOverlay];
+        if (!selectedTrade || !report?.config) {
+          overlays.forEach((overlay) => {
+            overlay.textContent = "Run backtest or select a trade.";
+            overlay.classList.remove("hidden");
+          });
+          return;
+        }
+        if (!window.Highcharts) {
+          overlays.forEach((overlay) => {
+            overlay.textContent = "Chart library could not load. Restart the server and refresh this page.";
+            overlay.classList.remove("hidden");
+          });
+          return;
+        }
+
+        overlays.forEach((overlay) => {
+          overlay.textContent = "Loading candles...";
+          overlay.classList.remove("hidden");
+        });
+        const entryTimeframe = report.config.timeframe;
+        const exitTimeframe = report.config.trail_timeframe || report.config.timeframe;
+        document.getElementById("entryChartTimeframe").textContent = entryTimeframe;
+        document.getElementById("exitChartTimeframe").textContent = exitTimeframe;
+        const rangeText = chartMode === "window"
+          ? ` | Window ${currentChartWindow().from} to ${currentChartWindow().to} | ${tradesForCurrentChart().length} trades`
+          : "";
+        document.getElementById("chartMeta").textContent =
+          `${selectedTrade.trade_date} | Entry ${entryTimeframe} / Exit Trail ${exitTimeframe} | ${selectedTrade.side} | Entry ${fmt(selectedTrade.entry_price)} | Exit ${fmt(selectedTrade.exit_price)}${rangeText}`;
+
+        async function fetchChartCandles(timeframe) {
+          const params = new URLSearchParams({
+            data_source: report.config.data_source || "MT5",
+            symbol: report.config.symbol,
+            timeframe,
+          });
+          if (chartMode === "window") {
+            const range = currentChartWindow();
+            params.set("from_date", range.from);
+            params.set("to_date", range.to);
+          } else {
+            params.set("trade_date", selectedTrade.trade_date);
+          }
+          const data = await apiJson(`/api/candles?${params.toString()}`);
+          if (!data.candles || data.candles.length === 0) {
+            throw new Error(`No ${timeframe} candles returned for ${selectedTrade.trade_date}.`);
+          }
+          return data.candles;
+        }
+
+        const chartRequests = [
+          {
+            kind: "entry",
+            timeframe: entryTimeframe,
+            overlay: entryOverlay,
+            containerId: "entryCandleChart",
+            seriesLabel: "Entry Candles",
+          },
+          {
+            kind: "exit",
+            timeframe: exitTimeframe,
+            overlay: exitOverlay,
+            containerId: "exitCandleChart",
+            seriesLabel: "Exit Trail Candles",
+          },
+        ];
+        await Promise.all(chartRequests.map(async (chartRequest) => {
+          try {
+            const candles = await fetchChartCandles(chartRequest.timeframe);
+            if (requestId !== chartRequestId) return;
+            renderHighcharts(chartRequest, candles);
+            chartRequest.overlay.classList.add("hidden");
+          } catch (error) {
+            if (requestId !== chartRequestId) return;
+            chartRequest.overlay.textContent = error.message;
+            chartRequest.overlay.classList.remove("hidden");
+          }
+        }));
+      }
+
+      function renderHighcharts(chartRequest, candles) {
+        const ohlc = candles.map((item) => [
+          item.time * 1000,
+          Number(item.open),
+          Number(item.high),
+          Number(item.low),
+          Number(item.close),
+        ]);
+        const entryTime = tradeMarkerTime(selectedTrade.entry_time);
+        const exitTime = tradeMarkerTime(selectedTrade.exit_time);
+        const rangeStartTime = istDateTimeMs(selectedTrade.trade_date, report.config.range_start || "08:30");
+        const rangeEndTime = istDateTimeMs(selectedTrade.trade_date, report.config.range_end || "09:30");
+        const entryColor = selectedTrade.side === "BUY" ? "#059669" : "#e11d48";
+        const visibleTrades = tradesForCurrentChart();
+
+        const existingChart = chartRequest.kind === "entry" ? entryCandleChart : exitCandleChart;
+        if (existingChart) {
+          existingChart.destroy();
+        }
+
+        const chart = Highcharts.stockChart(chartRequest.containerId, {
+          time: {
+            timezone: "Asia/Kolkata",
+          },
+          chart: {
+            backgroundColor: "#ffffff",
+            spacing: [12, 12, 8, 8],
+            style: { fontFamily: "Inter, system-ui, sans-serif" },
+          },
+          credits: { enabled: false },
+          rangeSelector: { enabled: false },
+          navigator: { enabled: true, height: 32 },
+          scrollbar: { enabled: true },
+          title: { text: "" },
+          xAxis: {
+            crosshair: { color: "#475569", dashStyle: "Dash", width: 1 },
+            ordinal: false,
+            labels: { format: "{value:%d %b %H:%M}" },
+            plotBands: [
+              {
+                from: rangeStartTime,
+                to: rangeEndTime,
+                color: "rgba(37, 99, 235, 0.10)",
+                label: {
+                  text: "IST Range",
+                  style: { color: "#1d4ed8", fontWeight: "700" },
+                },
+              },
+            ],
+            plotLines: [
+              { value: entryTime, color: entryColor, width: 1, dashStyle: "Dash", label: { text: "Entry", rotation: 0, y: 14, style: { color: entryColor, fontWeight: "700" } } },
+              { value: exitTime, color: "#7c3aed", width: 1, dashStyle: "Dash", label: { text: "Exit", rotation: 0, y: 30, style: { color: "#7c3aed", fontWeight: "700" } } },
+            ],
+          },
+          yAxis: {
+            opposite: true,
+            crosshair: { color: "#475569", dashStyle: "Dash", width: 1 },
+            gridLineColor: "#eef2f7",
+            labels: { style: { color: "#64748b" } },
+            plotLines: [
+              priceLine(selectedTrade.range_high, "Range High", "#2563eb"),
+              priceLine(selectedTrade.range_low, "Range Low", "#2563eb"),
+              priceLine(selectedTrade.entry_price, "Entry", entryColor),
+              priceLine(selectedTrade.exit_price, "Exit", "#7c3aed"),
+            ],
+          },
+          tooltip: {
+            split: false,
+            shared: true,
+            outside: false,
+            followPointer: false,
+            followTouchMove: false,
+            borderColor: "#cbd5e1",
+            backgroundColor: "rgba(255,255,255,0.96)",
+            xDateFormat: "%A, %d %b %Y %H:%M IST",
+            valueDecimals: 2,
+            positioner: function (labelWidth, labelHeight, point) {
+              const chart = this.chart;
+              return {
+                x: chart.plotLeft + chart.plotWidth - labelWidth - 12,
+                y: chart.plotTop + 10,
+              };
+            },
+            shadow: false,
+            style: {
+              fontSize: "12px",
+              lineHeight: "16px",
+            },
+          },
+          plotOptions: {
+            candlestick: {
+              color: "#e11d48",
+              upColor: "#059669",
+              lineColor: "#e11d48",
+              upLineColor: "#059669",
+            },
+            series: {
+              turboThreshold: 0,
+              dataGrouping: { enabled: false },
+            },
+          },
+          series: [
+            {
+              type: "candlestick",
+              name: `${report.config.symbol} ${chartRequest.timeframe} ${chartRequest.seriesLabel}`,
+              data: ohlc,
+              id: "ohlc",
+            },
+            {
+              type: "flags",
+              name: "Trade Marks",
+              onSeries: "ohlc",
+              shape: "flag",
+              width: 56,
+              data: tradeFlags(visibleTrades),
+            },
+          ],
+        });
+        if (chartRequest.kind === "entry") {
+          entryCandleChart = chart;
+        } else {
+          exitCandleChart = chart;
+        }
+        const focusStart = chartMode === "window"
+          ? istDateTimeMs(currentChartWindow().from, report.config.range_start || "08:30") - 60 * 60 * 1000
+          : rangeStartTime - 60 * 60 * 1000;
+        const focusEnd = chartMode === "window"
+          ? istDateTimeMs(currentChartWindow().to, report.config.session_end || "19:30") + 60 * 60 * 1000
+          : exitTime + 60 * 60 * 1000;
+        const dataMin = chart.xAxis[0].dataMin;
+        const dataMax = chart.xAxis[0].dataMax;
+        if (Number.isFinite(dataMin) && Number.isFinite(dataMax)) {
+          chart.xAxis[0].setExtremes(
+            Math.max(dataMin, focusStart),
+            Math.min(dataMax, focusEnd),
+            true,
+            false
+          );
+        }
+      }
+
+      function tradesForCurrentChart() {
+        const trades = report?.trades || [];
+        if (chartMode !== "window") return [selectedTrade];
+        const range = currentChartWindow();
+        return trades.filter((trade) => trade.trade_date >= range.from && trade.trade_date <= range.to);
+      }
+
+      function tradeFlags(trades) {
+        const showEntry = document.getElementById("showEntryFlagInput").checked;
+        const showExit = document.getElementById("showExitFlagInput").checked;
+        return trades.flatMap((trade) => {
+          const isSelected = trade === selectedTrade;
+          const entryColor = trade.side === "BUY" ? "#059669" : "#e11d48";
+          const flags = [];
+          if (showEntry) {
+            flags.push({
+              x: tradeMarkerTime(trade.entry_time),
+              title: isSelected ? trade.side : trade.side[0],
+              text: `${trade.trade_date} ${trade.side} Entry ${fmt(trade.entry_price)}`,
+              color: entryColor,
+              fillColor: isSelected ? entryColor : "#ffffff",
+              style: { color: isSelected ? "#ffffff" : entryColor, fontWeight: "700" },
+            });
+          }
+          if (showExit) {
+            flags.push({
+              x: tradeMarkerTime(trade.exit_time),
+              title: isSelected ? "EXIT" : "X",
+              text: `${trade.trade_date} Exit ${fmt(trade.exit_price)} | P&L ${fmt(trade.pnl_points)}`,
+              color: "#7c3aed",
+              fillColor: isSelected ? "#7c3aed" : "#ffffff",
+              style: { color: isSelected ? "#ffffff" : "#7c3aed", fontWeight: "700" },
+            });
+          }
+          return flags;
+        });
+      }
+
+      function istDateTimeMs(day, hhmm) {
+        const [hour, minute] = hhmm.split(":").map(Number);
+        const utcMs = Date.UTC(
+          Number(day.slice(0, 4)),
+          Number(day.slice(5, 7)) - 1,
+          Number(day.slice(8, 10)),
+          hour - 5,
+          minute - 30
+        );
+        return utcMs;
+      }
+
+      function priceLine(value, text, color) {
+        return {
+          value: Number(value),
+          color,
+          width: 2,
+          dashStyle: "ShortDash",
+          label: {
+            text,
+            align: "right",
+            x: -8,
+            style: { color, fontWeight: "700" },
+          },
+        };
+      }
+
+      document.getElementById("runBtn").addEventListener("click", runBacktest);
+      initInfoButtons();
+      [
+        ["optimizerRangeStartAddBtn", "optimizerRangeStartAddInput", "optimizerRangeStartPicker", "optimizerRangeStarts"],
+        ["optimizerEntryCutoffAddBtn", "optimizerEntryCutoffAddInput", "optimizerEntryCutoffPicker", "optimizerEntryCutoffs"],
+        ["optimizerSessionEndAddBtn", "optimizerSessionEndAddInput", "optimizerSessionEndPicker", "optimizerSessionEnds"],
+      ].forEach(([buttonId, addInputId, pickerId, hiddenInputId]) => {
+        document.getElementById(buttonId).addEventListener("click", () => {
+          const input = document.getElementById(addInputId);
+          addValuePickerItem(pickerId, hiddenInputId, input.value);
+          if (window.lucide) lucide.createIcons();
+        });
+      });
+      document.getElementById("optimizerRangeStart24Btn").addEventListener("click", () => {
+        setValuePickerItems("optimizerRangeStartPicker", "optimizerRangeStarts", hourlyTimes());
+      });
+      document.getElementById("optimizerSessionEnd24Btn").addEventListener("click", () => {
+        setValuePickerItems("optimizerSessionEndPicker", "optimizerSessionEnds", hourlyTimes());
+      });
+      document.getElementById("optimizerForm").addEventListener("submit", startOptimizer);
+      document.getElementById("optimizerScanSelect").addEventListener("change", (event) => {
+        if (event.target.value) openOptimizerScan(event.target.value);
+      });
+      document.getElementById("optimizerExportBtn").addEventListener("click", (event) => {
+        const source = event.currentTarget.dataset.source || document.getElementById("dataSourceInput").value || "MT5";
+        const symbol = event.currentTarget.dataset.symbol || document.getElementById("symbolInput").value || "";
+        const scan_id = event.currentTarget.dataset.scanId || "";
+        window.location.href = `${API_BASE}/api/optimizer/export?${new URLSearchParams({ source, symbol, scan_id }).toString()}`;
+      });
+      document.getElementById("optimizerRows").addEventListener("click", (event) => {
+        const button = event.target.closest(".use-optimizer-btn");
+        if (!button) return;
+        const result = optimizerResults[Number(button.dataset.optimizerIndex)];
+        if (result) useOptimizerResult(result);
+      });
+      document.querySelectorAll(".optimizer-sort-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.optimizerSort;
+          optimizerSortState = {
+            key,
+            direction: optimizerSortState.key === key && optimizerSortState.direction === "asc" ? "desc" : "asc",
+          };
+          if (activeOptimizerScan) renderOptimizerResults(activeOptimizerScan);
+        });
+      });
+      document.getElementById("logoutBtn").addEventListener("click", async () => {
+        try {
+          await fetch("/logout", {
+            method: "POST",
+            headers: { "X-CSRF-Token": csrfToken },
+          });
+        } finally {
+          window.location.href = "/login";
+        }
+      });
+      document.getElementById("exportExcelBtn").addEventListener("click", () => {
+        const source = report?.config?.data_source || document.getElementById("dataSourceInput").value || "MT5";
+        window.location.href = `${API_BASE}/api/export/excel?${new URLSearchParams({ source }).toString()}`;
+      });
+      document.getElementById("backtestForm").addEventListener("submit", (event) => {
+        event.preventDefault();
+        runBacktest();
+      });
+      document.querySelectorAll(".filter-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          activeFilter = button.dataset.filter;
+          tradeRowsLimit = TRADE_ROWS_BATCH;
+          document.querySelectorAll(".filter-btn").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          renderTrades();
+        });
+      });
+      document.getElementById("searchInput").addEventListener("input", (event) => {
+        searchText = event.target.value;
+        tradeRowsLimit = TRADE_ROWS_BATCH;
+        renderTrades();
+      });
+      document.getElementById("loadMoreTradesBtn").addEventListener("click", () => {
+        tradeRowsLimit += TRADE_ROWS_BATCH;
+        renderTrades();
+      });
+      document.getElementById("symbolInput").addEventListener("focus", () => {
+        renderSymbolMenu();
+        document.getElementById("symbolMenu").classList.add("open");
+      });
+      document.getElementById("symbolInput").addEventListener("input", () => {
+        renderSymbolMenu();
+        document.getElementById("symbolMenu").classList.add("open");
+      });
+      document.getElementById("symbolMenu").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-symbol]");
+        if (!button) return;
+        document.getElementById("symbolInput").value = button.dataset.symbol;
+        document.getElementById("symbolMenu").classList.remove("open");
+        loadHistoryInfo();
+      });
+      document.addEventListener("click", (event) => {
+        if (!event.target.closest(".symbol-combo")) {
+          document.getElementById("symbolMenu").classList.remove("open");
+        }
+      });
+      document.getElementById("tradeRows").addEventListener("click", (event) => {
+        const row = event.target.closest("tr[data-trade-index]");
+        if (!row || !report?.trades) return;
+        selectedTrade = report.trades[Number(row.dataset.tradeIndex)];
+        chartWindowStart = selectedTrade.trade_date;
+        renderTrades();
+        loadChartForSelectedTrade();
+      });
+      document.querySelectorAll(".chart-mode").forEach((button) => {
+        button.addEventListener("click", () => {
+          chartMode = button.dataset.chartMode;
+          if (chartMode === "window") chartWindowStart = selectedTrade?.trade_date || chartWindowStart;
+          document.querySelectorAll(".chart-mode").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          loadChartForSelectedTrade();
+        });
+      });
+      document.getElementById("prevChartBtn").addEventListener("click", () => {
+        chartMode = "window";
+        document.querySelectorAll(".chart-mode").forEach((item) => item.classList.toggle("active", item.dataset.chartMode === "window"));
+        chartWindowStart = clampDate(addDays(chartWindowStart || selectedTrade.trade_date, -windowDays()));
+        loadChartForSelectedTrade();
+      });
+      document.getElementById("nextChartBtn").addEventListener("click", () => {
+        chartMode = "window";
+        document.querySelectorAll(".chart-mode").forEach((item) => item.classList.toggle("active", item.dataset.chartMode === "window"));
+        chartWindowStart = clampDate(addDays(chartWindowStart || selectedTrade.trade_date, windowDays()));
+        loadChartForSelectedTrade();
+      });
+      document.getElementById("chartWindowInput").addEventListener("change", () => {
+        if (chartMode === "window") loadChartForSelectedTrade();
+      });
+      document.getElementById("showEntryFlagInput").addEventListener("change", loadChartForSelectedTrade);
+      document.getElementById("showExitFlagInput").addEventListener("change", loadChartForSelectedTrade);
+      document.querySelectorAll(".points-mode").forEach((button) => {
+        button.addEventListener("click", () => {
+          pointsMode = button.dataset.pointsMode;
+          if ((pointsMode === "month" || pointsMode === "year") && pointsRange.preset === "30") {
+            pointsRange.preset = "all";
+            pointsRange.from = null;
+            pointsRange.to = null;
+            document.getElementById("pointsPresetInput").value = "all";
+          }
+          document.querySelectorAll(".points-mode").forEach((item) => item.classList.remove("active"));
+          button.classList.add("active");
+          renderPointsChart();
+        });
+      });
+      document.getElementById("timeframeInput").addEventListener("change", loadHistoryInfo);
+      document.getElementById("trailTimeframeInput").addEventListener("change", loadHistoryInfo);
+      document.getElementById("fromDateInput").addEventListener("change", loadHistoryInfo);
+      document.getElementById("toDateInput").addEventListener("change", loadHistoryInfo);
+      document.getElementById("symbolInput").addEventListener("change", loadHistoryInfo);
+      document.getElementById("symbolInput").addEventListener("change", () => loadLatestOptimizer());
+      document.getElementById("dataSourceInput").addEventListener("change", async () => {
+        updateTimeframeOptions("M5", "M5");
+        fillOptimizerTimeframes();
+        document.getElementById("symbolInput").value = "";
+        availableSymbols = [];
+        await loadSymbols();
+        await loadLatestOptimizer();
+        loadHistoryInfo();
+      });
+      document.getElementById("pointsPresetInput").addEventListener("change", (event) => {
+        pointsRange.preset = event.target.value;
+        const trades = report?.trades || [];
+        if (!trades.length) return;
+        const first = trades[0].trade_date;
+        const last = trades[trades.length - 1].trade_date;
+        if (pointsRange.preset === "all") {
+          pointsRange.from = first;
+          pointsRange.to = last;
+        } else if (pointsRange.preset !== "custom") {
+          pointsRange.to = last;
+          pointsRange.from = addDays(last, -(Number(pointsRange.preset) - 1));
+          if (pointsRange.from < first) pointsRange.from = first;
+        }
+        document.getElementById("pointsFromInput").value = pointsRange.from;
+        document.getElementById("pointsToInput").value = pointsRange.to;
+        renderPointsChart();
+      });
+      document.getElementById("pointsFromInput").addEventListener("change", (event) => {
+        pointsRange.preset = "custom";
+        document.getElementById("pointsPresetInput").value = "custom";
+        pointsRange.from = event.target.value;
+        renderPointsChart();
+      });
+      document.getElementById("pointsToInput").addEventListener("change", (event) => {
+        pointsRange.preset = "custom";
+        document.getElementById("pointsPresetInput").value = "custom";
+        pointsRange.to = event.target.value;
+        renderPointsChart();
+      });
+      document.getElementById("pointsChart").addEventListener("mousemove", (event) => {
+        const rect = event.currentTarget.getBoundingClientRect();
+        drawPointsHover(event.clientX - rect.left, event.clientY - rect.top);
+      });
+      document.getElementById("pointsChart").addEventListener("mouseleave", () => {
+        document.getElementById("pointsTooltip").classList.remove("open");
+        renderPointsChart();
+      });
+      document.getElementById("chartHeightInput").addEventListener("input", (event) => {
+        document.querySelectorAll(".chart-shell").forEach((chartShell) => {
+          chartShell.style.height = `${event.target.value}px`;
+        });
+        if (entryCandleChart) entryCandleChart.reflow();
+        if (exitCandleChart) exitCandleChart.reflow();
+      });
+      function zoomCandleCharts(factor) {
+        [entryCandleChart, exitCandleChart].forEach((chart) => {
+          if (!chart) return;
+          const axis = chart.xAxis[0];
+          const extremes = axis.getExtremes();
+          const dataMin = extremes.dataMin;
+          const dataMax = extremes.dataMax;
+          if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax) || dataMax <= dataMin) return;
+          const currentMin = Number.isFinite(extremes.min) ? extremes.min : dataMin;
+          const currentMax = Number.isFinite(extremes.max) ? extremes.max : dataMax;
+          const midpoint = (currentMin + currentMax) / 2;
+          const fullSpan = dataMax - dataMin;
+          const nextSpan = Math.min(fullSpan, Math.max(fullSpan / 80, (currentMax - currentMin) * factor));
+          let nextMin = midpoint - nextSpan / 2;
+          let nextMax = midpoint + nextSpan / 2;
+          if (nextMin < dataMin) {
+            nextMax += dataMin - nextMin;
+            nextMin = dataMin;
+          }
+          if (nextMax > dataMax) {
+            nextMin -= nextMax - dataMax;
+            nextMax = dataMax;
+          }
+          axis.setExtremes(Math.max(dataMin, nextMin), Math.min(dataMax, nextMax), true, false);
+        });
+      }
+      document.getElementById("zoomOutChartBtn").addEventListener("click", () => zoomCandleCharts(1.5));
+      document.getElementById("zoomInChartBtn").addEventListener("click", () => zoomCandleCharts(0.67));
+      document.getElementById("fitChartBtn").addEventListener("click", () => {
+        if (entryCandleChart) entryCandleChart.xAxis[0].setExtremes(null, null);
+        if (exitCandleChart) exitCandleChart.xAxis[0].setExtremes(null, null);
+      });
+      window.addEventListener("resize", () => {
+        if (report) renderPointsChart();
+      });
+      document.querySelectorAll(".sort-btn").forEach((button) => {
+        button.addEventListener("click", () => {
+          const key = button.dataset.sort;
+          sortState = {
+            key,
+            direction: sortState.key === key && sortState.direction === "asc" ? "desc" : "asc",
+          };
+          tradeRowsLimit = TRADE_ROWS_BATCH;
+          renderTrades();
+        });
+      });
+
+      async function boot() {
+        await loadSession();
+        await loadDefaults();
+        await loadSymbols();
+        if (initialReport) {
+          report = initialReport;
+          selectedTrade = report.trades?.[0] || null;
+          resetPointsRange();
+          fillFormFromReport();
+          renderAll();
+          await loadHistoryInfo();
+          loadChartForSelectedTrade();
+          setStatus("Default 1-year result loaded", "ready");
+        } else {
+          await loadHistoryInfo();
+          setStatus("Open with python server.py to run MT5", "error");
+          renderTrades();
+          if (window.lucide) lucide.createIcons();
+        }
+        await loadLatestOptimizer();
+      }
+
+      boot();
+    </script>
+  </body>
+</html>
