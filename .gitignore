@@ -2,3 +2,5 @@ __pycache__/
 instance/
 cache/
 results/
+private_algo/runtime/
+private_algo/config.local.json

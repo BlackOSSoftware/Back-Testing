@@ -6,9 +6,9 @@ from datetime import date, time, timedelta
 from itertools import product
 from pathlib import Path
 
-from backtest_mt5 import BacktestConfig
-from market_data import fetch_source_rates
-from optimizer_engine import build_entry_layout, build_scan_context, evaluate_scan_batch
+from backtest_desk.backtest_mt5 import BacktestConfig
+from backtest_desk.market_data import fetch_source_rates
+from backtest_desk.optimizer_engine import build_entry_layout, build_scan_context, evaluate_scan_batch
 
 
 SOURCE = "MT5"

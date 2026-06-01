@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 from dataclasses import asdict, dataclass
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
@@ -12,6 +13,8 @@ from zoneinfo import ZoneInfo
 
 import MetaTrader5 as mt5
 import pandas as pd
+
+from .app_paths import REPORT_DATA_FILE, RESULTS_DIR
 
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -43,7 +46,12 @@ TIMEFRAME_MINUTES = {
 }
 
 RATES_CACHE_SECONDS = 60.0
+MT5_FETCH_CHUNK_DAYS = max(int(os.getenv("BACKTEST_MT5_CHUNK_DAYS", "30")), 1)
 _rates_cache: dict[tuple[str, str, date, date], tuple[float, pd.DataFrame]] = {}
+
+
+def clear_rates_cache() -> None:
+    _rates_cache.clear()
 
 
 @dataclass
@@ -72,17 +80,17 @@ class BacktestConfig:
     to_date: date
     data_source: str = "MT5"
     timeframe: str = "M5"
-    trail_timeframe: str = "M5"
+    trail_timeframe: str = "M15"
     range_start: time = time(8, 30)
     range_end: time = time(9, 30)
     session_start: time = time(9, 30)
     entry_cutoff: time = time(18, 0)
     session_end: time = time(19, 30)
     entry_pattern: str = "BOTH"
-    entry_buffer_pct: float = 0.0005
-    stop_points: float = 400.0
-    first_trail_profit: float = 400.0
-    first_trail_lock_loss: float = 300.0
+    entry_buffer_pct: float = 0.0025
+    stop_points: float = 500.0
+    first_trail_profit: float = 700.0
+    first_trail_lock_loss: float = 200.0
     second_trail_profit: float = 700.0
     data_from_date: date | None = None
     data_to_date: date | None = None
@@ -118,20 +126,7 @@ def fetch_rates(config: BacktestConfig) -> pd.DataFrame:
             raise RuntimeError(f"Symbol not available in MT5 Market Watch: {config.symbol}")
 
         time_shift_hours = detect_broker_time_shift_hours(config.symbol)
-        end_ist = ist_datetime(config.to_date + timedelta(days=1), time(0, 0))
-        rates = None
-        probe_date = config.from_date
-        while probe_date <= config.to_date:
-            start_ist = ist_datetime(probe_date, time(0, 0))
-            rates = mt5.copy_rates_range(
-                config.symbol,
-                TIMEFRAMES[timeframe],
-                start_ist.astimezone(UTC),
-                end_ist.astimezone(UTC),
-            )
-            if rates is not None and len(rates) > 0:
-                break
-            probe_date += timedelta(days=30)
+        rates = copy_rates_range_chunked(config.symbol, TIMEFRAMES[timeframe], config.from_date, config.to_date)
     finally:
         mt5.shutdown()
 
@@ -139,6 +134,7 @@ def fetch_rates(config: BacktestConfig) -> pd.DataFrame:
         raise RuntimeError("No MT5 candle data returned. Check symbol name, date range, and broker history.")
 
     df = pd.DataFrame(rates)
+    df = df.drop_duplicates(subset=["time"], keep="last").sort_values("time")
     df["time_utc"] = pd.to_datetime(df["time"], unit="s", utc=True)
     df["time_ist"] = df["time_utc"].dt.tz_convert(IST)
     df["time_ist"] = df["time_ist"] - pd.Timedelta(hours=time_shift_hours)
@@ -147,6 +143,28 @@ def fetch_rates(config: BacktestConfig) -> pd.DataFrame:
     df = df[["time_ist", "trade_date", "open", "high", "low", "close", "tick_volume"]].copy()
     _rates_cache[cache_key] = (monotonic(), df)
     return df.copy()
+
+
+def copy_rates_range_chunked(symbol: str, timeframe: int, from_date: date, to_date: date):
+    frames = []
+    cursor = from_date
+    while cursor <= to_date:
+        chunk_to = min(cursor + timedelta(days=MT5_FETCH_CHUNK_DAYS - 1), to_date)
+        start_ist = ist_datetime(cursor, time(0, 0))
+        end_ist = ist_datetime(chunk_to + timedelta(days=1), time(0, 0))
+        rates = mt5.copy_rates_range(
+            symbol,
+            timeframe,
+            start_ist.astimezone(UTC),
+            end_ist.astimezone(UTC),
+        )
+        if rates is not None and len(rates) > 0:
+            frames.append(pd.DataFrame(rates))
+        cursor = chunk_to + timedelta(days=1)
+
+    if not frames:
+        return None
+    return pd.concat(frames, ignore_index=True)
 
 
 def detect_broker_time_shift_hours(symbol: str) -> int:
@@ -451,7 +469,7 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
 
 def write_outputs(summary: dict) -> None:
     source = str(summary.get("config", {}).get("data_source", "MT5")).upper()
-    output_dir = Path("results")
+    output_dir = RESULTS_DIR
     source_dir = output_dir / source.lower()
     output_dir.mkdir(exist_ok=True)
     source_dir.mkdir(exist_ok=True)
@@ -468,7 +486,7 @@ def write_outputs(summary: dict) -> None:
     # replaces a user's locally verified MT5 dashboard after refresh.
     if source == "MT5":
         (output_dir / "backtest_summary.json").write_text(serialized, encoding="utf-8")
-        Path("report_data.js").write_text(
+        REPORT_DATA_FILE.write_text(
             "window.BACKTEST_REPORT = " + serialized + ";\n",
             encoding="utf-8",
         )
@@ -485,14 +503,14 @@ def main() -> None:
     parser.add_argument("--from", dest="from_date", required=True, type=parse_date, help="Start date YYYY-MM-DD.")
     parser.add_argument("--to", dest="to_date", required=True, type=parse_date, help="End date YYYY-MM-DD.")
     parser.add_argument("--timeframe", default="M5", choices=sorted(TIMEFRAMES), help="MT5 timeframe.")
-    parser.add_argument("--trail-timeframe", default="M5", choices=sorted(TIMEFRAMES), help="Timeframe for the two-candle trail after second profit trigger.")
+    parser.add_argument("--trail-timeframe", default="M15", choices=sorted(TIMEFRAMES), help="Timeframe for the two-candle trail after second profit trigger.")
     parser.add_argument("--range-start", default="08:30", type=parse_time, help="Range start HH:MM IST.")
     parser.add_argument("--range-end", default="09:30", type=parse_time, help="Range end HH:MM IST.")
     parser.add_argument("--session-start", default="09:30", type=parse_time, help="Session start HH:MM IST.")
     parser.add_argument("--entry-cutoff", default="18:00", type=parse_time, help="Last time a new entry may trigger, HH:MM IST.")
     parser.add_argument("--session-end", default="19:30", type=parse_time, help="Forced exit time for running trades, HH:MM IST.")
-    parser.add_argument("--buffer-pct", default=0.05, type=float, help="Entry buffer percent. 0.05 means 0.05 percent.")
-    parser.add_argument("--stop-points", default=400.0, type=float, help="Initial stop-loss points.")
+    parser.add_argument("--buffer-pct", default=0.25, type=float, help="Entry buffer percent. 0.25 means 0.25 percent.")
+    parser.add_argument("--stop-points", default=500.0, type=float, help="Initial stop-loss points.")
     args = parser.parse_args()
 
     config = BacktestConfig(
@@ -530,7 +548,7 @@ def main() -> None:
     stats = summary["stats"]
     print(f"Backtest complete for {config.symbol}")
     print(f"Trades: {stats['total_trades']} | Win rate: {stats['win_rate_pct']}% | Net: {stats['net_points']} points")
-    print("Open index.html to view the dashboard.")
+    print("Run python server.py and open http://127.0.0.1:5000 to view the dashboard.")
 
 
 if __name__ == "__main__":

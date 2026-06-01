@@ -9,7 +9,8 @@ from urllib.request import Request, urlopen
 
 import pandas as pd
 
-from backtest_mt5 import BacktestConfig, IST, TIMEFRAMES, UTC, fetch_rates, ist_datetime
+from .app_paths import CACHE_DIR
+from .backtest_mt5 import BacktestConfig, IST, TIMEFRAMES, UTC, fetch_rates, ist_datetime
 
 
 DELTA_BASE_URL = "https://api.india.delta.exchange/v2"
@@ -39,10 +40,15 @@ SOURCE_TIMEFRAMES = {
     "MT5": list(TIMEFRAMES),
     "DELTA": list(DELTA_TIMEFRAMES),
 }
-DELTA_CACHE_DIR = Path("cache") / "delta"
+DELTA_CACHE_DIR = CACHE_DIR / "delta"
 DELTA_MAX_CANDLES_PER_REQUEST = 1800
 _delta_launch_cache: dict[str, date | None] = {}
 _delta_frame_cache: dict[str, pd.DataFrame] = {}
+
+
+def clear_market_data_cache() -> None:
+    _delta_launch_cache.clear()
+    _delta_frame_cache.clear()
 
 
 def normalize_source(value: str | None) -> str:

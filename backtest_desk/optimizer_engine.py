@@ -6,7 +6,7 @@ from datetime import time
 import numpy as np
 import pandas as pd
 
-from backtest_mt5 import BacktestConfig, TIMEFRAME_MINUTES
+from .backtest_mt5 import BacktestConfig, TIMEFRAME_MINUTES
 
 try:
     from numba import njit, prange

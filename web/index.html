@@ -25,6 +25,7 @@
           <a href="#ratios"><i data-lucide="percent"></i> Ratios</a>
           <a href="#records"><i data-lucide="table-2"></i> Records</a>
           <a href="#optimizer"><i data-lucide="search-check"></i> Optimizer</a>
+          <a href="/algo"><i data-lucide="radio-tower"></i> Algo Control</a>
           <a href="/profile"><i data-lucide="user-round"></i> Profile</a>
         </nav>
         <div class="side-card">
@@ -58,6 +59,14 @@
               <i data-lucide="play"></i>
               Run Backtest
             </button>
+            <button id="switchAlgoBtn" class="secondary-btn" type="button">
+              <i data-lucide="radio-tower"></i>
+              Switch to Algo
+            </button>
+            <button id="clearAllDataBtn" class="secondary-btn danger-btn" type="button">
+              <i data-lucide="trash-2"></i>
+              Clear All Data
+            </button>
             <button id="logoutBtn" class="secondary-btn" type="button">
               <i data-lucide="log-out"></i>
               Log out
@@ -85,6 +94,10 @@
                 <input id="symbolInput" name="symbol" autocomplete="off" placeholder="Search symbol..." required />
                 <div id="symbolMenu" class="symbol-menu"></div>
               </div>
+            </label>
+            <label>
+              <span>Strategy Name</span>
+              <input id="strategyNameInput" name="strategy_name" autocomplete="off" placeholder="Morning breakout M5" />
             </label>
             <label>
               <span>Entry Candle Timeframe</span>
@@ -131,20 +144,20 @@
               <input name="session_end" type="time" value="19:30" required />
             </label>
             <label>
-              <span>Entry Buffer % <button class="info-btn" type="button" title="Range high ke upar ya range low ke neeche extra safety gap. Example 0.05 means 0.05 percent.">?</button></span>
-              <input name="entry_buffer_pct" type="number" value="0.05" step="0.01" min="0" />
+              <span>Entry Buffer % <button class="info-btn" type="button" title="Range high ke upar ya range low ke neeche extra safety gap. Example 0.25 means 0.25 percent.">?</button></span>
+              <input name="entry_buffer_pct" type="number" value="0.25" step="0.01" min="0" />
             </label>
             <label>
               <span>Stop Loss <button class="info-btn" type="button" title="Initial SL points distance. BUY me entry price minus stop loss; SELL me entry price plus stop loss. Example: entry 100000 and stop 750 means BUY SL 99250, SELL SL 100750.">?</button></span>
-              <input name="stop_points" type="number" value="400" step="1" min="0" />
+              <input name="stop_points" type="number" value="500" step="1" min="0" />
             </label>
             <label>
               <span>Trail After Profit <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai.">?</button></span>
-              <input name="first_trail_profit" type="number" value="400" step="1" min="0" />
+              <input name="first_trail_profit" type="number" value="700" step="1" min="0" />
             </label>
             <label>
               <span>Trail SL Lock <button class="info-btn" type="button" title="First trail active hone ke baad stop loss entry se kitne points door lock hoga.">?</button></span>
-              <input name="first_trail_lock_loss" type="number" value="300" step="1" min="0" />
+              <input name="first_trail_lock_loss" type="number" value="200" step="1" min="0" />
             </label>
           </form>
           <div class="data-note">
@@ -618,7 +631,8 @@
         document.getElementById("dataSourceInput").value = cfg.data_source || "MT5";
         updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M5");
         fillOptimizerTimeframes();
-        document.getElementById("symbolInput").value = cfg.symbol || "BTCUSDc";
+        document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD";
+        document.getElementById("strategyNameInput").value = cfg.strategy_name || `${cfg.symbol || "BTCUSD"} ${cfg.timeframe || "M5"} breakout`;
         document.getElementById("timeframeInput").value = cfg.timeframe || "M5";
         document.getElementById("trailTimeframeInput").value = cfg.trail_timeframe || cfg.timeframe || "M5";
         document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
@@ -630,10 +644,10 @@
           session_start: cfg.session_start || "09:30",
           entry_cutoff: cfg.entry_cutoff || "18:00",
           session_end: cfg.session_end || "19:30",
-          entry_buffer_pct: cfg.entry_buffer_pct ?? 0.05,
-          stop_points: cfg.stop_points ?? 400,
-          first_trail_profit: cfg.first_trail_profit ?? 400,
-          first_trail_lock_loss: cfg.first_trail_lock_loss ?? 300,
+          entry_buffer_pct: cfg.entry_buffer_pct ?? 0.25,
+          stop_points: cfg.stop_points ?? 500,
+          first_trail_profit: cfg.first_trail_profit ?? 700,
+          first_trail_lock_loss: cfg.first_trail_lock_loss ?? 200,
           second_trail_profit: cfg.second_trail_profit ?? 700,
         };
         Object.entries(values).forEach(([name, value]) => {
@@ -655,10 +669,12 @@
           document.getElementById("fromDateInput").value = defaults.from_date;
           document.getElementById("toDateInput").value = defaults.to_date;
           document.getElementById("dataSourceInput").value = defaults.defaults.data_source || "MT5";
+          document.getElementById("symbolInput").value = defaults.defaults.symbol || "BTCUSD";
+          document.getElementById("strategyNameInput").value = `${defaults.defaults.symbol || "BTCUSD"} ${defaults.defaults.timeframe || "M5"} breakout`;
           updateTimeframeOptions(defaults.defaults.timeframe, defaults.defaults.trail_timeframe || defaults.defaults.timeframe);
           document.getElementById("entryPatternInput").value = defaults.defaults.entry_pattern || "BOTH";
         } else {
-          updateTimeframeOptions("M5", "M5");
+          updateTimeframeOptions("M5", "M15");
         }
         fillOptimizerTimeframes();
       }
@@ -669,7 +685,7 @@
         document.getElementById("timeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
         document.getElementById("trailTimeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
         document.getElementById("timeframeInput").value = timeframes.includes(entryValue) ? entryValue : "M5";
-        document.getElementById("trailTimeframeInput").value = timeframes.includes(trailValue) ? trailValue : "M5";
+        document.getElementById("trailTimeframeInput").value = timeframes.includes(trailValue) ? trailValue : "M15";
       }
 
       function renderValuePicker(containerId, inputId, options, selectedValues, settings = {}) {
@@ -783,7 +799,7 @@
           if (Array.isArray(symbols)) {
             availableSymbols = symbols;
             if (!document.getElementById("symbolInput").value) {
-              const preferred = source === "DELTA" ? "BTCUSD" : "BTCUSDc";
+              const preferred = "BTCUSD";
               document.getElementById("symbolInput").value = symbols.includes(preferred) ? preferred : symbols[0] || "";
             }
             renderSymbolMenu();
@@ -791,7 +807,7 @@
         } catch {
           if (!document.getElementById("symbolInput").value) {
             document.getElementById("symbolInput").value =
-              (document.getElementById("dataSourceInput").value || "MT5") === "DELTA" ? "BTCUSD" : "BTCUSDc";
+              "BTCUSD";
           }
         }
       }
@@ -799,7 +815,7 @@
       async function loadHistoryInfo() {
         const requestId = ++historyRequestId;
         const source = document.getElementById("dataSourceInput").value || "MT5";
-        const symbol = document.getElementById("symbolInput").value || "BTCUSDc";
+        const symbol = document.getElementById("symbolInput").value || "BTCUSD";
         const entryTimeframe = document.getElementById("timeframeInput").value || "M5";
         const trailTimeframe = document.getElementById("trailTimeframeInput").value || entryTimeframe;
         const fromDate = document.getElementById("fromDateInput").value;
@@ -859,6 +875,7 @@
 
       async function runBacktest() {
         const btn = document.getElementById("runBtn");
+        const clearButton = document.getElementById("clearAllDataBtn");
         const values = collectForm();
         if (values.entry_cutoff < values.session_start || values.entry_cutoff > values.session_end) {
           setStatus("Last Entry Time must be between Session Start and Force Exit Time.", "error");
@@ -866,6 +883,7 @@
         }
         const requestId = ++backtestRequestId;
         btn.disabled = true;
+        clearButton.disabled = true;
         setStatus(values.data_source === "DELTA" ? "Downloading/caching Delta candles..." : "Running MT5...", "loading");
         try {
           const data = await apiJson("/api/backtest", {
@@ -885,6 +903,78 @@
           setStatus(error.message, "error");
         } finally {
           btn.disabled = false;
+          clearButton.disabled = false;
+        }
+      }
+
+      async function saveStrategyAndOpenAlgo() {
+        const button = document.getElementById("switchAlgoBtn");
+        const values = collectForm();
+        if (values.entry_cutoff < values.session_start || values.entry_cutoff > values.session_end) {
+          setStatus("Last Entry Time must be between Session Start and Force Exit Time.", "error");
+          return;
+        }
+        button.disabled = true;
+        setStatus("Saving strategy for algo...", "loading");
+        try {
+          await apiJson("/api/algo/strategies", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              ...values,
+              name: values.strategy_name?.trim() || `${values.symbol || "Strategy"} ${values.timeframe || "M5"}`,
+            }),
+          });
+          window.location.href = "/algo";
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          button.disabled = false;
+        }
+      }
+
+      async function clearAllData() {
+        const button = document.getElementById("clearAllDataBtn");
+        const runButton = document.getElementById("runBtn");
+        const confirmed = window.confirm("Clear all saved backtest results, optimizer scans, downloaded candle cache, and Python caches? This cannot be undone.");
+        if (!confirmed) return;
+        button.disabled = true;
+        runButton.disabled = true;
+        setStatus("Clearing saved data...", "loading");
+        try {
+          const result = await apiJson("/api/data/clear", { method: "POST" });
+          if (optimizerPollTimer) {
+            window.clearTimeout(optimizerPollTimer);
+            optimizerPollTimer = null;
+          }
+          report = null;
+          selectedTrade = null;
+          activeOptimizerScan = null;
+          optimizerResults = [];
+          backtestRequestId += 1;
+          chartRequestId += 1;
+          tradeRowsLimit = TRADE_ROWS_BATCH;
+          resetPointsRange();
+          document.getElementById("sideSymbol").textContent = "-";
+          document.getElementById("sideMeta").textContent = "Waiting for run";
+          document.getElementById("dataNoteText").textContent = "Saved results, downloaded candle cache, and Python caches are empty. Run a new backtest to create data.";
+          document.getElementById("historyInfo").querySelector("span:last-child").textContent = "Saved data cleared. Checking source availability...";
+          document.getElementById("chartMeta").textContent = "Run a backtest to load trade candle charts.";
+          document.getElementById("entryChartTimeframe").textContent = "-";
+          document.getElementById("exitChartTimeframe").textContent = "-";
+          [entryCandleChart, exitCandleChart].forEach((chart) => chart?.destroy());
+          entryCandleChart = null;
+          exitCandleChart = null;
+          renderAll();
+          loadChartForSelectedTrade();
+          await loadLatestOptimizer();
+          setStatus(result.message, "ready");
+          await loadHistoryInfo();
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          button.disabled = false;
+          runButton.disabled = false;
         }
       }
 
@@ -1842,6 +1932,8 @@
       }
 
       document.getElementById("runBtn").addEventListener("click", runBacktest);
+      document.getElementById("switchAlgoBtn").addEventListener("click", saveStrategyAndOpenAlgo);
+      document.getElementById("clearAllDataBtn").addEventListener("click", clearAllData);
       initInfoButtons();
       [
         ["optimizerRangeStartAddBtn", "optimizerRangeStartAddInput", "optimizerRangeStartPicker", "optimizerRangeStarts"],
@@ -1997,7 +2089,7 @@
       document.getElementById("symbolInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("symbolInput").addEventListener("change", () => loadLatestOptimizer());
       document.getElementById("dataSourceInput").addEventListener("change", async () => {
-        updateTimeframeOptions("M5", "M5");
+        updateTimeframeOptions("M5", "M15");
         fillOptimizerTimeframes();
         document.getElementById("symbolInput").value = "";
         availableSymbols = [];
