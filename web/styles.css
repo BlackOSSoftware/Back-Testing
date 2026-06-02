@@ -740,6 +740,50 @@ select:focus {
   box-shadow: 0 0 0 3px rgba(15, 118, 110, 0.12);
 }
 
+.password-field,
+.profile-field {
+  position: relative;
+}
+
+.password-field input,
+.auth-form .password-field input,
+.profile-field input[type="password"],
+.profile-field input[type="text"] {
+  padding-right: 52px;
+}
+
+.password-toggle {
+  align-items: center;
+  background: #f8fafc;
+  border: 1px solid #cbd5e1;
+  border-radius: 7px;
+  color: #0f172a;
+  cursor: pointer;
+  display: flex;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  position: absolute;
+  right: 7px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  z-index: 3;
+}
+
+.password-toggle svg {
+  height: 18px;
+  width: 18px;
+}
+
+.password-toggle:hover,
+.password-toggle:focus-visible {
+  background: #ecfdf5;
+  border-color: #0f766e;
+  color: #0f766e;
+  outline: none;
+}
+
 .profile-content {
   align-content: start;
   gap: 16px;
@@ -777,10 +821,6 @@ select:focus {
   color: #475569;
   font-size: 13px;
   font-weight: 750;
-}
-
-.profile-field {
-  position: relative;
 }
 
 .profile-field svg {

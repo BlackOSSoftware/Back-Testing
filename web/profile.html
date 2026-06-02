@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Profile | Backtest Desk</title>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/styles.css?v=2" />
   </head>
   <body>
     <div class="app-shell profile-shell">
@@ -100,6 +100,9 @@
                   <div class="profile-field">
                     <i data-lucide="lock-keyhole"></i>
                     <input name="current_password" type="password" autocomplete="current-password" required />
+                    <button class="password-toggle" type="button" data-password-toggle aria-label="Show current password">
+                      <i data-lucide="eye"></i>
+                    </button>
                   </div>
                 </label>
                 <div class="password-grid">
@@ -108,6 +111,9 @@
                     <div class="profile-field">
                       <i data-lucide="key-round"></i>
                       <input name="new_password" type="password" autocomplete="new-password" minlength="8" required />
+                      <button class="password-toggle" type="button" data-password-toggle aria-label="Show new password">
+                        <i data-lucide="eye"></i>
+                      </button>
                     </div>
                   </label>
                   <label>
@@ -115,6 +121,9 @@
                     <div class="profile-field">
                       <i data-lucide="shield-check"></i>
                       <input name="confirm_password" type="password" autocomplete="new-password" minlength="8" required />
+                      <button class="password-toggle" type="button" data-password-toggle aria-label="Show confirm password">
+                        <i data-lucide="eye"></i>
+                      </button>
                     </div>
                   </label>
                 </div>
@@ -231,6 +240,18 @@
 
       document.querySelectorAll("#profileForm input").forEach((input) => {
         input.addEventListener("input", updateProfilePreview);
+      });
+
+      document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const input = button.parentElement.querySelector("input");
+          const icon = button.querySelector("i");
+          const isHidden = input.type === "password";
+          input.type = isHidden ? "text" : "password";
+          button.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+          icon.setAttribute("data-lucide", isHidden ? "eye-off" : "eye");
+          if (window.lucide) lucide.createIcons();
+        });
       });
 
       document.getElementById("passwordForm").addEventListener("submit", async (event) => {

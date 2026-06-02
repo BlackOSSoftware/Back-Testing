@@ -14,6 +14,7 @@ from .backtest_mt5 import (
     BacktestConfig,
     IST,
     choose_first_trigger,
+    clear_rates_cache,
     ist_datetime,
     parse_time,
     previous_two_completed_high,
@@ -24,7 +25,7 @@ from .market_data import fetch_source_rates, normalize_source, validate_source_t
 
 ALGO_FILE = INSTANCE_DIR / "algo.json"
 ALGO_MAGIC = 260530
-ALGO_POLL_SECONDS = 10
+ALGO_POLL_SECONDS = 2
 
 _lock = Lock()
 _stop_event = Event()
@@ -46,13 +47,15 @@ def default_state() -> dict:
         "signal_log": [],
         "trade_log": [],
         "last_error": "",
+        "algo_status": "Stopped.",
+        "pending_order_day": "",
     }
 
 
 def load_state() -> dict:
     if not ALGO_FILE.exists():
         return default_state()
-    data = json.loads(ALGO_FILE.read_text(encoding="utf-8"))
+    data = json.loads(ALGO_FILE.read_text(encoding="utf-8-sig"))
     state = default_state()
     state.update({key: value for key, value in data.items() if key in state})
     return state
@@ -82,8 +85,9 @@ def normalize_strategy(data: dict) -> dict:
         "entry_cutoff": parse_time(data.get("entry_cutoff", "18:00")).strftime("%H:%M"),
         "session_end": parse_time(data.get("session_end", "19:30")).strftime("%H:%M"),
         "entry_buffer_pct": float(data.get("entry_buffer_pct", 0.25)),
+        "entry_buffer_points": float(data.get("entry_buffer_points", 0) or 0),
         "stop_points": float(data.get("stop_points", 500)),
-        "first_trail_profit": float(data.get("first_trail_profit", 700)),
+        "first_trail_profit": float(data.get("first_trail_profit", 400)),
         "first_trail_lock_loss": float(data.get("first_trail_lock_loss", 200)),
         "second_trail_profit": float(data.get("second_trail_profit", 700)),
         "volume": float(data.get("volume", 0.01) or 0.01),
@@ -131,6 +135,8 @@ def config_for(strategy: dict) -> BacktestConfig:
 def build_signal(strategy: dict) -> dict:
     current = now_ist()
     config = config_for(strategy)
+    if str(strategy.get("data_source", "MT5")).upper() == "MT5":
+        clear_rates_cache()
     df = fetch_source_rates(config)
     today_df = df[df["trade_date"] == current.date()].copy()
     if today_df.empty:
@@ -152,9 +158,16 @@ def build_signal(strategy: dict) -> dict:
         return {**base, "phase": "BUILDING_RANGE", "status": "Building range", "message": f"Range completes at {config.range_end.strftime('%H:%M')}."}
     range_high = float(range_df["high"].max())
     range_low = float(range_df["low"].min())
-    buy_trigger = range_high * (1 + config.entry_buffer_pct)
-    sell_trigger = range_low * (1 - config.entry_buffer_pct)
-    base.update({"range_high": range_high, "range_low": range_low, "buy_trigger": buy_trigger, "sell_trigger": sell_trigger})
+    buffer_points = float(strategy.get("entry_buffer_points", 0) or 0)
+    if buffer_points > 0:
+        buy_trigger = range_high + buffer_points
+        sell_trigger = range_low - buffer_points
+        buffer_label = f"{buffer_points:g} points"
+    else:
+        buy_trigger = range_high * (1 + config.entry_buffer_pct)
+        sell_trigger = range_low * (1 - config.entry_buffer_pct)
+        buffer_label = f"{float(strategy.get('entry_buffer_pct', 0.0)):g}%"
+    base.update({"range_high": range_high, "range_low": range_low, "buy_trigger": buy_trigger, "sell_trigger": sell_trigger, "buffer": buffer_label})
     if current.time() >= config.session_end:
         return {**base, "phase": "FORCE_EXIT_DUE", "status": "Force exit due", "message": "Force exit time passed."}
     if current.time() > config.entry_cutoff:
@@ -206,10 +219,23 @@ def pending_sides(strategy: dict) -> list[str]:
     return ["BUY", "SELL"]
 
 
+def pending_order_side(order) -> str:
+    order_type = int(getattr(order, "type", -1))
+    if order_type == mt5.ORDER_TYPE_BUY_STOP:
+        return "BUY"
+    if order_type == mt5.ORDER_TYPE_SELL_STOP:
+        return "SELL"
+    return ""
+
+
 def mt5_result_payload(result) -> dict:
     data = result._asdict() if hasattr(result, "_asdict") else {"result": str(result)}
     data["ok"] = int(data.get("retcode", 0)) in {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED}
     return data
+
+
+def set_algo_status(state: dict, message: str) -> None:
+    state["algo_status"] = f"{now_ist().strftime('%H:%M:%S')} - {message}"
 
 
 def pending_order_payload(strategy: dict, signal: dict, side: str, info, tick) -> dict | None:
@@ -241,32 +267,57 @@ def pending_order_payload(strategy: dict, signal: dict, side: str, info, tick) -
     }
 
 
-def ensure_pending_orders(strategy: dict, signal: dict, state: dict) -> None:
+def ensure_pending_orders(strategy: dict, signal: dict, state: dict) -> int:
     if not mt5.initialize():
         state["last_error"] = f"MT5 initialize failed: {mt5.last_error()}"
-        return
+        set_algo_status(state, state["last_error"])
+        return 0
     try:
         symbol = strategy["symbol"]
         if not mt5.symbol_select(symbol, True):
             state["last_error"] = f"symbol_select failed: {mt5.last_error()}"
-            return
+            set_algo_status(state, state["last_error"])
+            return 0
         info = mt5.symbol_info(symbol)
         tick = mt5.symbol_info_tick(symbol)
         if tick is None or info is None:
             state["last_error"] = "No MT5 tick/symbol info."
-            return
+            set_algo_status(state, state["last_error"])
+            return 0
         if getattr(info, "trade_mode", None) == mt5.SYMBOL_TRADE_MODE_DISABLED:
             state["last_error"] = "MT5 trading is disabled for this symbol."
-            return
+            set_algo_status(state, state["last_error"])
+            return 0
         existing = mt5_pending_orders(strategy)
-        existing_types = {int(getattr(order, "type", -1)) for order in existing}
         any_result = False
+        active_count = 0
         for side in pending_sides(strategy):
             order_type = mt5.ORDER_TYPE_BUY_STOP if side == "BUY" else mt5.ORDER_TYPE_SELL_STOP
-            if order_type in existing_types:
-                continue
             request_payload = pending_order_payload(strategy, signal, side, info, tick)
             if request_payload is None:
+                continue
+            desired_price = float(request_payload["price"])
+            desired_sl = float(request_payload["sl"])
+            matching_order = None
+            for order in existing:
+                if int(getattr(order, "type", -1)) != order_type:
+                    continue
+                same_price = round(float(getattr(order, "price_open", 0.0)), digits) == round(desired_price, digits)
+                same_sl = round(float(getattr(order, "sl", 0.0) or 0.0), digits) == round(desired_sl, digits)
+                if same_price and same_sl:
+                    matching_order = order
+                    break
+                mt5.order_send(
+                    {
+                        "action": mt5.TRADE_ACTION_REMOVE,
+                        "order": int(getattr(order, "ticket")),
+                        "symbol": strategy["symbol"],
+                        "magic": ALGO_MAGIC,
+                        "comment": "AlgoControl reprice",
+                    }
+                )
+            if matching_order is not None:
+                active_count += 1
                 continue
             result = mt5_result_payload(mt5.order_send(request_payload))
             result["request"] = request_payload
@@ -289,9 +340,13 @@ def ensure_pending_orders(strategy: dict, signal: dict, state: dict) -> None:
             any_result = True
             if not result.get("ok"):
                 state["last_error"] = str(result)
-                return
+                set_algo_status(state, f"Pending {side} failed.")
+                return active_count
+            active_count += 1
         if any_result or existing:
             state["last_error"] = ""
+        set_algo_status(state, f"Watching pending orders. Active pending: {active_count}.")
+        return active_count
     finally:
         mt5.shutdown()
 
@@ -310,6 +365,44 @@ def cancel_pending_orders(strategy: dict) -> None:
                     "comment": "AlgoControl cancel",
                 }
             )
+    finally:
+        mt5.shutdown()
+
+
+def cancel_opposite_pending_orders(strategy: dict, keep_side: str, state: dict) -> int:
+    keep_side = str(keep_side or "").upper()
+    if keep_side not in {"BUY", "SELL"}:
+        return 0
+    if not mt5.initialize():
+        state["last_error"] = f"MT5 initialize failed: {mt5.last_error()}"
+        set_algo_status(state, state["last_error"])
+        return 0
+    try:
+        remaining = 0
+        cancelled = 0
+        for order in mt5_pending_orders(strategy):
+            side = pending_order_side(order)
+            if side == keep_side:
+                remaining += 1
+                continue
+            result = mt5_result_payload(
+                mt5.order_send(
+                    {
+                        "action": mt5.TRADE_ACTION_REMOVE,
+                        "order": int(getattr(order, "ticket")),
+                        "symbol": strategy["symbol"],
+                        "magic": ALGO_MAGIC,
+                        "comment": f"AlgoControl OCO keep {keep_side}",
+                    }
+                )
+            )
+            if result.get("ok"):
+                cancelled += 1
+            else:
+                state["last_error"] = str(result)
+        if cancelled and not state.get("last_error"):
+            set_algo_status(state, f"{keep_side} signal confirmed. Opposite pending order cancelled.")
+        return remaining
     finally:
         mt5.shutdown()
 
@@ -441,7 +534,7 @@ def manage_open_positions(strategy: dict, state: dict) -> bool:
             candidate_sl = None
 
             if profit_points >= float(strategy["first_trail_profit"]):
-                first_sl = entry - float(strategy["first_trail_lock_loss"]) if side == "BUY" else entry + float(strategy["first_trail_lock_loss"])
+                first_sl = entry + float(strategy["first_trail_lock_loss"]) if side == "BUY" else entry - float(strategy["first_trail_lock_loss"])
                 candidate_sl = first_sl
 
             if profit_points >= float(strategy["second_trail_profit"]):
@@ -459,68 +552,29 @@ def manage_open_positions(strategy: dict, state: dict) -> bool:
         mt5.shutdown()
 
 
-def send_order(strategy: dict, signal: dict) -> dict:
-    if not mt5.initialize():
-        return {"ok": False, "error": f"MT5 initialize failed: {mt5.last_error()}"}
-    try:
-        symbol = strategy["symbol"]
-        if not mt5.symbol_select(symbol, True):
-            return {"ok": False, "error": f"symbol_select failed: {mt5.last_error()}"}
-        tick = mt5.symbol_info_tick(symbol)
-        info = mt5.symbol_info(symbol)
-        if tick is None or info is None:
-            return {"ok": False, "error": "No MT5 tick/symbol info."}
-        if getattr(info, "trade_mode", None) == mt5.SYMBOL_TRADE_MODE_DISABLED:
-            return {"ok": False, "error": "MT5 trading is disabled for this symbol."}
-        side = signal.get("side")
-        price = float(tick.ask if side == "BUY" else tick.bid)
-        digits = int(info.digits or 2)
-        stop = float(strategy["stop_points"])
-        target = 0.0
-        sl = price - stop if side == "BUY" else price + stop
-        tp = 0.0 if target <= 0 else (price + target if side == "BUY" else price - target)
-        request_payload = {
-            "action": mt5.TRADE_ACTION_DEAL,
-            "symbol": symbol,
-            "volume": float(strategy["volume"]),
-            "type": mt5.ORDER_TYPE_BUY if side == "BUY" else mt5.ORDER_TYPE_SELL,
-            "price": round(price, digits),
-            "sl": round(sl, digits),
-            "tp": round(tp, digits) if tp else 0.0,
-            "deviation": 50,
-            "magic": ALGO_MAGIC,
-            "comment": "AlgoControl",
-            "type_time": mt5.ORDER_TIME_GTC,
-            "type_filling": mt5.ORDER_FILLING_IOC,
-        }
-        result = mt5.order_send(request_payload)
-        data = result._asdict() if hasattr(result, "_asdict") else {"result": str(result)}
-        data["ok"] = int(data.get("retcode", 0)) in {mt5.TRADE_RETCODE_DONE, mt5.TRADE_RETCODE_PLACED}
-        data["request"] = request_payload
-        return data
-    finally:
-        mt5.shutdown()
-
-
-def today_count(state: dict, strategy_id: str) -> int:
-    today = now_ist().date().isoformat()
-    return sum(1 for item in state.get("trade_log", []) if item.get("strategy_id") == strategy_id and str(item.get("time", "")).startswith(today))
-
-
 def update_state(state: dict, execute: bool) -> dict:
     strategy = active_strategy(state)
     if not strategy:
         state["last_signal"] = None
+        set_algo_status(state, "No active strategy selected.")
         return state
     signal = build_signal(strategy)
     state["last_signal"] = signal
+    today = now_ist().date().isoformat()
     if execute and state.get("running"):
+        if state.get("pending_order_day") and state.get("pending_order_day") != today:
+            cancel_pending_orders(strategy)
+            state["pending_order_day"] = ""
+            set_algo_status(state, "New day detected. Old pending orders cancelled.")
         has_position = manage_open_positions(strategy, state)
         if signal.get("phase") in {"ENTRY_CLOSED", "FORCE_EXIT_DUE"}:
             cancel_pending_orders(strategy)
-        elif signal.get("phase") in {"WATCHING", "SIGNAL"} and not has_position:
+            state["pending_order_day"] = ""
+            set_algo_status(state, "Entry window closed. Pending orders cancelled; managing exits only.")
+        elif signal.get("phase") == "WATCHING" and not has_position:
             if not mt5.initialize():
                 state["last_error"] = f"MT5 initialize failed: {mt5.last_error()}"
+                set_algo_status(state, state["last_error"])
             else:
                 try:
                     open_positions = len(mt5_positions(strategy))
@@ -529,14 +583,55 @@ def update_state(state: dict, execute: bool) -> dict:
                 if open_positions:
                     cancel_pending_orders(strategy)
                     state["last_error"] = ""
+                    set_algo_status(state, "Open position found. Pending orders cancelled; managing trade.")
                 else:
-                    ensure_pending_orders(strategy, signal, state)
+                    active_count = ensure_pending_orders(strategy, signal, state)
+                    if active_count:
+                        state["pending_order_day"] = today
+                    elif not state.get("last_error"):
+                        set_algo_status(state, "Price already crossed a trigger; not chasing market. Waiting for next valid pending setup.")
+        elif signal.get("phase") == "SIGNAL" and not has_position:
+            remaining_same_side = cancel_opposite_pending_orders(strategy, signal.get("side", ""), state)
+            if mt5.initialize():
+                try:
+                    pending_count = len(mt5_pending_orders(strategy))
+                    open_positions = len(mt5_positions(strategy))
+                finally:
+                    mt5.shutdown()
+                if open_positions:
+                    cancel_pending_orders(strategy)
+                    state["last_error"] = ""
+                    set_algo_status(state, "Trigger filled. Open position active; managing trade.")
+                elif pending_count:
+                    side = signal.get("side", "signal")
+                    set_algo_status(state, f"{side} signal confirmed. Opposite pending cancelled. Active pending: {pending_count}. Waiting for MT5 fill.")
+                elif remaining_same_side:
+                    side = signal.get("side", "signal")
+                    set_algo_status(state, f"{side} signal confirmed. Waiting for same-side pending fill.")
+                else:
+                    set_algo_status(state, "Trigger already crossed but no pending order is active. No market order will be sent; waiting for next valid setup/day.")
+            else:
+                state["last_error"] = f"MT5 initialize failed: {mt5.last_error()}"
+                set_algo_status(state, state["last_error"])
+        elif has_position:
+            set_algo_status(state, "Open position active. Managing trailing stop and force exit.")
+        else:
+            set_algo_status(state, signal.get("message", "Checking market."))
+    elif state.get("running"):
+        if not state.get("algo_status"):
+            set_algo_status(state, f"Worker running. Phase: {signal.get('phase', 'WAIT')}.")
+    else:
+        set_algo_status(state, f"Stopped/check-only. Phase: {signal.get('phase', 'WAIT')}.")
     return state
 
 
 def public_state(state: dict) -> dict:
     today = now_ist().date().isoformat()
-    trades_today = [item for item in state.get("trade_log", []) if str(item.get("time", "")).startswith(today)]
+    trades_today = [
+        item
+        for item in state.get("trade_log", [])
+        if str(item.get("time", "")).startswith(today) and (item.get("result") or {}).get("kind") != "PENDING"
+    ]
     return {**state, "active_strategy": active_strategy(state), "trades_today": len(trades_today), "recent_trades": list(reversed(state.get("trade_log", [])[-25:]))}
 
 
@@ -671,5 +766,24 @@ def create_algo_blueprint(auth_required, csrf_is_valid) -> Blueprint:
             state = update_state(load_state(), execute=True)
             save_state(state)
             return jsonify({"message": "Checked.", "algo": public_state(state)})
+
+    @bp.post("/api/algo/clear-logs")
+    @auth_required
+    def clear_logs():
+        if not csrf_is_valid():
+            return jsonify({"error": "Invalid security token."}), 400
+        with _lock:
+            state = load_state()
+            state["trade_log"] = []
+            state["signal_log"] = []
+            state["last_error"] = ""
+            save_state(state)
+            return jsonify({"message": "Trade logs cleared.", "algo": public_state(state)})
+
+    try:
+        if load_state().get("running"):
+            ensure_worker()
+    except Exception:
+        pass
 
     return bp

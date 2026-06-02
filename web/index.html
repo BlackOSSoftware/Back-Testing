@@ -152,11 +152,11 @@
               <input name="stop_points" type="number" value="500" step="1" min="0" />
             </label>
             <label>
-              <span>Trail After Profit <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai.">?</button></span>
-              <input name="first_trail_profit" type="number" value="700" step="1" min="0" />
+              <span>First Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai. Exit nahi hota.">?</button></span>
+              <input name="first_trail_profit" type="number" value="400" step="1" min="0" />
             </label>
             <label>
-              <span>Trail SL Lock <button class="info-btn" type="button" title="First trail active hone ke baad stop loss entry se kitne points door lock hoga.">?</button></span>
+              <span>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad BUY me entry ke upar aur SELL me entry ke neeche SL lock points.">?</button></span>
               <input name="first_trail_lock_loss" type="number" value="200" step="1" min="0" />
             </label>
           </form>
@@ -240,7 +240,7 @@
             </label>
             <label>
               <span>First Trail Profit Values <button class="info-btn" type="button" title="Trade itne points profit me aate hi first trailing SL activate hota hai. Har comma-separated value separately test hogi.">?</button></span>
-              <input name="first_trail_profit_values" value="700,600,500" placeholder="700,600,500" />
+              <input name="first_trail_profit_values" value="400,700,600,500" placeholder="400,700,600,500" />
             </label>
             <label>
               <span>First Trail Lock Values <button class="info-btn" type="button" title="First trail active hone ke baad SL entry ke opposite side kitne points par lock hoga. Example BUY me entry minus lock; SELL me entry plus lock.">?</button></span>
@@ -646,7 +646,7 @@
           session_end: cfg.session_end || "19:30",
           entry_buffer_pct: cfg.entry_buffer_pct ?? 0.25,
           stop_points: cfg.stop_points ?? 500,
-          first_trail_profit: cfg.first_trail_profit ?? 700,
+          first_trail_profit: cfg.first_trail_profit ?? 400,
           first_trail_lock_loss: cfg.first_trail_lock_loss ?? 200,
           second_trail_profit: cfg.second_trail_profit ?? 700,
         };

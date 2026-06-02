@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Algo Control</title>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    <link rel="stylesheet" href="/algo.css" />
+    <link rel="stylesheet" href="/algo.css?v=2" />
   </head>
   <body>
     <main class="shell">
@@ -39,6 +39,7 @@
         <div class="metric"><span>Trades Today</span><strong id="tradesToday">-</strong></div>
         <div class="metric"><span>Last Check</span><strong id="lastCheck">-</strong></div>
         <div class="metric"><span>Last Error</span><strong id="lastError">-</strong></div>
+        <div class="metric status-wide"><span>Current Status</span><strong id="algoStatus">-</strong></div>
       </section>
 
       <section class="panel">
@@ -68,10 +69,11 @@
           <label><span>Last Entry</span><input name="entry_cutoff" type="time" /></label>
           <label><span>Force Exit</span><input name="session_end" type="time" /></label>
           <label><span>Entry Buffer %</span><input name="entry_buffer_pct" type="number" step="0.01" min="0" /></label>
+          <label><span>Entry Buffer Points</span><input name="entry_buffer_points" type="number" step="0.01" min="0" /></label>
           <label><span>Stop Loss Points</span><input name="stop_points" type="number" step="1" min="0" /></label>
-          <label><span>Trail After Profit</span><input name="first_trail_profit" type="number" step="1" min="0" /></label>
-          <label><span>Trail SL Lock</span><input name="first_trail_lock_loss" type="number" step="1" min="0" /></label>
-          <label><span>Second Trail Trigger</span><input name="second_trail_profit" type="number" step="1" min="0" /></label>
+          <label><span>First Target</span><input name="first_trail_profit" type="number" step="1" min="0" /></label>
+          <label><span>First SL Lock</span><input name="first_trail_lock_loss" type="number" step="1" min="0" /></label>
+          <label><span>Second Target</span><input name="second_trail_profit" type="number" step="1" min="0" /></label>
           <label><span>Lot Size</span><input name="volume" type="number" min="0.01" step="0.01" /></label>
         </form>
       </section>
@@ -102,7 +104,12 @@
       </section>
 
       <section class="panel">
-        <h2>Trade Log</h2>
+        <div class="panel-title compact">
+          <div>
+            <h2>Trade Log</h2>
+          </div>
+          <button id="clearLogsBtn" type="button"><i data-lucide="trash-2"></i> Clear Logs</button>
+        </div>
         <div class="table-wrap">
           <table>
             <thead>
@@ -113,6 +120,6 @@
         </div>
       </section>
     </main>
-    <script src="/algo.js"></script>
+    <script src="/algo.js?v=2"></script>
   </body>
 </html>

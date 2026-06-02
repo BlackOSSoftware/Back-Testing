@@ -315,7 +315,7 @@ def _evaluate_kernel(
                     exit_price = stop
                     break
                 if highs[idx] >= entry_price + first_trail_profit:
-                    candidate = entry_price - first_trail_lock_loss
+                    candidate = entry_price + first_trail_lock_loss
                     if candidate > stop:
                         stop = candidate
                 if highs[idx] >= entry_price + second_trail_profit:
@@ -327,7 +327,7 @@ def _evaluate_kernel(
                     exit_price = stop
                     break
                 if lows[idx] <= entry_price - first_trail_profit:
-                    candidate = entry_price + first_trail_lock_loss
+                    candidate = entry_price - first_trail_lock_loss
                     if candidate < stop:
                         stop = candidate
                 if lows[idx] <= entry_price - second_trail_profit:

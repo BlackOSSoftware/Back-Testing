@@ -89,7 +89,7 @@ class BacktestConfig:
     entry_pattern: str = "BOTH"
     entry_buffer_pct: float = 0.0025
     stop_points: float = 500.0
-    first_trail_profit: float = 700.0
+    first_trail_profit: float = 400.0
     first_trail_lock_loss: float = 200.0
     second_trail_profit: float = 700.0
     data_from_date: date | None = None
@@ -253,7 +253,7 @@ def manage_buy_trade(
             return candle_time.isoformat(), stop, stop_reason, mfe, mae
 
         if high >= entry_price + config.first_trail_profit:
-            first_trail_stop = entry_price - config.first_trail_lock_loss
+            first_trail_stop = entry_price + config.first_trail_lock_loss
             if first_trail_stop > stop:
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
@@ -297,7 +297,7 @@ def manage_sell_trade(
             return candle_time.isoformat(), stop, stop_reason, mfe, mae
 
         if low <= entry_price - config.first_trail_profit:
-            first_trail_stop = entry_price + config.first_trail_lock_loss
+            first_trail_stop = entry_price - config.first_trail_lock_loss
             if first_trail_stop < stop:
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"

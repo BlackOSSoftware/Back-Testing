@@ -48,7 +48,7 @@ AUTH_FILE = Path(app.instance_path) / "auth.json"
 SECRET_FILE = Path(app.instance_path) / "session_secret"
 PROFILE_FILE = Path(app.instance_path) / "profile.json"
 DEFAULT_USERNAME = "admin"
-DEFAULT_PASSWORD_HASH = "scrypt:32768:8:1$5ezU4PbXVn1eXgW6$02e3ccaebdde3f3ad2cded259d4c6400e813ddccb727b63fd7d3f504b3a25e3e29d5da5bdf7cc4e0495f2e52fd88ce587d6ba5239f8239db38eeeb7c8f398321"
+DEFAULT_PASSWORD_HASH = "scrypt:32768:8:1$QISOB6xfCKIB9Tef$1c28c2344d09c3fd43b055bc5d8699ce98e315cfa296c74193cd6ffe647c0d8a64bbef97ca68fbd6eb5f9b05e2927be83bd6f5b84dbb44cbc6242444e83a7a6d"
 LOGIN_WINDOW_SECONDS = 300.0
 LOGIN_MAX_ATTEMPTS = 5
 _login_failures: dict[str, list[float]] = {}
@@ -467,7 +467,7 @@ def optimizer_payload(data: dict) -> dict:
     parameters = {
         "entry_buffer_pct": scan_values(data, "entry_buffer_values", [0.05, 0.20, 0.25], float),
         "stop_points": scan_values(data, "stop_points_values", [400.0, 500.0, 300.0, 200.0], float),
-        "first_trail_profit": scan_values(data, "first_trail_profit_values", [700.0, 600.0, 500.0], float),
+        "first_trail_profit": scan_values(data, "first_trail_profit_values", [400.0, 700.0, 600.0, 500.0], float),
         "first_trail_lock_loss": scan_values(data, "first_trail_lock_values", [300.0, 400.0, 200.0], float),
         "second_trail_profit": [700.0],
     }
@@ -1154,7 +1154,7 @@ def defaults():
                 "session_end": "19:30",
                 "entry_buffer_pct": 0.25,
                 "stop_points": 500,
-                "first_trail_profit": 700,
+                "first_trail_profit": 400,
                 "first_trail_lock_loss": 200,
                 "second_trail_profit": 700,
             },
@@ -1339,7 +1339,7 @@ def run_backtest():
             session_end=parse_time(data.get("session_end", "19:30")),
             entry_buffer_pct=float(data.get("entry_buffer_pct", 0.25)) / 100,
             stop_points=float(data.get("stop_points", 500)),
-            first_trail_profit=float(data.get("first_trail_profit", 700)),
+            first_trail_profit=float(data.get("first_trail_profit", 400)),
             first_trail_lock_loss=float(data.get("first_trail_lock_loss", 200)),
             second_trail_profit=float(data.get("second_trail_profit", 700)),
         )

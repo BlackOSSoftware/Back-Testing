@@ -35,6 +35,15 @@ function item(label, value) {
   return `<div><span>${label}</span><strong>${value ?? "-"}</strong></div>`;
 }
 
+function statusTone(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "level reached") return "level-reached";
+  if (normalized.includes("failed") || normalized.includes("error")) return "error";
+  if (normalized.includes("buy")) return "buy";
+  if (normalized.includes("sell")) return "sell";
+  return "neutral";
+}
+
 function currentSource() {
   return document.getElementById("strategyForm").elements.data_source.value || "MT5";
 }
@@ -57,6 +66,7 @@ const strategyFields = [
   "entry_cutoff",
   "session_end",
   "entry_buffer_pct",
+  "entry_buffer_points",
   "stop_points",
   "first_trail_profit",
   "first_trail_lock_loss",
@@ -79,8 +89,9 @@ function fillStrategyForm(strategy) {
     entry_cutoff: "18:00",
     session_end: "19:30",
     entry_buffer_pct: 0.25,
+    entry_buffer_points: 0,
     stop_points: 500,
-    first_trail_profit: 700,
+    first_trail_profit: 400,
     first_trail_lock_loss: 200,
     second_trail_profit: 700,
     volume: 0.01,
@@ -97,7 +108,7 @@ function collectStrategyForm() {
   strategyFields.forEach((name) => {
     if (form.elements[name]) data[name] = form.elements[name].value;
   });
-  ["entry_buffer_pct", "stop_points", "first_trail_profit", "first_trail_lock_loss", "second_trail_profit", "volume"].forEach((name) => {
+  ["entry_buffer_pct", "entry_buffer_points", "stop_points", "first_trail_profit", "first_trail_lock_loss", "second_trail_profit", "volume"].forEach((name) => {
     data[name] = Number(data[name]);
   });
   const activeId = document.getElementById("strategySelect").value;
@@ -112,6 +123,7 @@ function renderStrategyDetails(strategy) {
     item("Pattern", strategy.entry_pattern),
     item("Range", `${strategy.range_start}-${strategy.range_end}`),
     item("Session", `${strategy.session_start}-${strategy.session_end}`),
+    item("Buffer", Number(strategy.entry_buffer_points || 0) > 0 ? `${fmt(strategy.entry_buffer_points)} pts` : `${fmt(strategy.entry_buffer_pct)}%`),
     item("Stop / Trail", `${fmt(strategy.stop_points)} / ${fmt(strategy.first_trail_profit)}-${fmt(strategy.first_trail_lock_loss)}`),
   ].join("") : item("Status", "No saved strategy");
 }
@@ -153,6 +165,7 @@ function render(algo) {
   document.getElementById("runningValue").textContent = running ? "YES" : "NO";
   document.getElementById("tradesToday").textContent = algo.trades_today ?? 0;
   document.getElementById("lastError").textContent = algo.last_error || "-";
+  document.getElementById("algoStatus").textContent = algo.algo_status || "-";
   document.getElementById("startBtn").disabled = running;
   document.getElementById("stopBtn").disabled = !running;
 
@@ -169,8 +182,11 @@ function render(algo) {
   renderStrategyDetails(strategy);
 
   const signal = algo.last_signal || {};
+  const signalStatus = signal.status || "No active strategy";
   document.getElementById("signalPhase").textContent = signal.phase || "NO_STRATEGY";
-  document.getElementById("signalStatus").textContent = signal.status || "No active strategy";
+  const signalStatusEl = document.getElementById("signalStatus");
+  signalStatusEl.textContent = signalStatus;
+  signalStatusEl.dataset.tone = statusTone(signalStatus);
   document.getElementById("signalMessage").textContent = signal.message || "Save or select a strategy first.";
   document.getElementById("lastCheck").textContent = shortTime(signal.checked_at);
   document.getElementById("signalDetails").innerHTML = [
@@ -178,6 +194,7 @@ function render(algo) {
     item("Range Low", fmt(signal.range_low)),
     item("Buy Trigger", fmt(signal.buy_trigger)),
     item("Sell Trigger", fmt(signal.sell_trigger)),
+    item("Buffer", signal.buffer || "-"),
     item("Side", signal.side || "WAIT"),
     item("Entry Ref", fmt(signal.entry_reference)),
     item("Stop Loss", fmt(signal.stop_loss)),
@@ -192,7 +209,8 @@ function render(algo) {
             : result.kind === "TRAIL_SL" ? "TRAIL SL UPDATED"
             : "ORDER SENT"
           : `FAILED: ${result.comment || result.error || result.retcode || "-"}`;
-        return `<tr><td>${shortTime(trade.time)}</td><td>${trade.symbol}</td><td><b>${trade.side}</b></td><td class="num">${fmt(trade.entry_reference)}</td><td class="num">${fmt(trade.stop_loss)}</td><td>${label}</td></tr>`;
+        const tone = statusTone(label);
+        return `<tr><td>${shortTime(trade.time)}</td><td>${trade.symbol}</td><td><b>${trade.side}</b></td><td class="num">${fmt(trade.entry_reference)}</td><td class="num">${fmt(trade.stop_loss)}</td><td><span class="result-badge" data-tone="${tone}">${label}</span></td></tr>`;
       }).join("")
     : `<tr><td class="empty" colspan="6">No trade attempts yet.</td></tr>`;
   if (window.lucide) lucide.createIcons();
@@ -200,7 +218,6 @@ function render(algo) {
 
 async function refresh() {
   render(await api("/api/algo/status"));
-  await loadSymbols();
 }
 
 async function postAction(button, path, body = {}) {
@@ -219,6 +236,7 @@ document.getElementById("refreshBtn").addEventListener("click", refresh);
 document.getElementById("startBtn").addEventListener("click", (event) => postAction(event.currentTarget, "/api/algo/start"));
 document.getElementById("stopBtn").addEventListener("click", (event) => postAction(event.currentTarget, "/api/algo/stop"));
 document.getElementById("checkBtn").addEventListener("click", (event) => postAction(event.currentTarget, "/api/algo/check"));
+document.getElementById("clearLogsBtn").addEventListener("click", (event) => postAction(event.currentTarget, "/api/algo/clear-logs"));
 document.getElementById("applyBtn").addEventListener("click", (event) => postAction(event.currentTarget, "/api/algo/apply", { strategy_id: document.getElementById("strategySelect").value }));
 document.getElementById("saveStrategyBtn").addEventListener("click", (event) => postAction(event.currentTarget, "/api/algo/strategies", collectStrategyForm()));
 document.getElementById("strategySelect").addEventListener("change", editSelectedStrategy);
@@ -247,6 +265,7 @@ async function boot() {
   const session = await api("/api/session");
   csrfToken = session.csrf_token;
   await refresh();
+  await loadSymbols();
 }
 
 boot();

@@ -4,7 +4,8 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Sign In | Backtest Desk</title>
-    <link rel="stylesheet" href="styles.css" />
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="styles.css?v=2" />
   </head>
   <body class="auth-body">
     <main class="auth-layout">
@@ -47,12 +48,31 @@
             </label>
             <label>
               <span>Password</span>
-              <input name="password" type="password" autocomplete="current-password" required placeholder="Enter password" />
+              <div class="password-field">
+                <input name="password" type="password" autocomplete="current-password" required placeholder="Enter password" />
+                <button class="password-toggle" type="button" data-password-toggle aria-label="Show password">
+                  <i data-lucide="eye"></i>
+                </button>
+              </div>
             </label>
             <button class="auth-submit" type="submit">Sign In</button>
           </form>
         </div>
       </section>
     </main>
+    <script>
+      document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const input = button.parentElement.querySelector("input");
+          const icon = button.querySelector("i");
+          const isHidden = input.type === "password";
+          input.type = isHidden ? "text" : "password";
+          button.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+          icon.setAttribute("data-lucide", isHidden ? "eye-off" : "eye");
+          if (window.lucide) lucide.createIcons();
+        });
+      });
+      if (window.lucide) lucide.createIcons();
+    </script>
   </body>
 </html>
