@@ -18,6 +18,11 @@ html {
   scroll-behavior: smooth;
 }
 
+html[data-page="dashboard"] .optimizer-only,
+html[data-page="optimizer"] .dashboard-only {
+  display: none !important;
+}
+
 body {
   background: var(--bg);
   color: var(--ink);
@@ -286,6 +291,14 @@ select {
 
 .panel-title > div {
   min-width: 0;
+}
+
+.panel-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
 }
 
 .status-pill {

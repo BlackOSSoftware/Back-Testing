@@ -164,7 +164,8 @@ function render(algo) {
   pill.classList.toggle("running", running);
   document.getElementById("runningValue").textContent = running ? "YES" : "NO";
   document.getElementById("tradesToday").textContent = algo.trades_today ?? 0;
-  document.getElementById("lastError").textContent = algo.last_error || "-";
+  const lastErrorEl = document.getElementById("lastError");
+  if (lastErrorEl) lastErrorEl.textContent = algo.last_error || "-";
   document.getElementById("algoStatus").textContent = algo.algo_status || "-";
   document.getElementById("startBtn").disabled = running;
   document.getElementById("stopBtn").disabled = !running;

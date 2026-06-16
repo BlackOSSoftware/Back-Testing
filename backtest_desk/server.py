@@ -38,7 +38,7 @@ from .market_data import (
     validate_source_timeframe,
 )
 from .optimizer_engine import ScanContext, build_entry_layout, build_scan_context, evaluate_scan_batch, warm_optimizer_engine
-from .algo_control import create_algo_blueprint
+from .algo_control import algo_is_running, create_algo_blueprint
 
 
 prepare_runtime()
@@ -97,6 +97,21 @@ OPTIMIZER_ENTRY_PATTERNS = {
 }
 OPTIMIZER_RESULT_SORTS = {"BALANCED", "WIN_RATE", "NET_POINTS", "LOWEST_TRADES", "WIN_POINTS"}
 FALLBACK_MT5_SYMBOLS = ["BTCUSD#", "BTCUSD", "ETHUSD", "XAUUSD", "XAGUSD", "US30", "NAS100", "SPX500"]
+
+
+def mt5_symbol_chart_candidates(symbol: str) -> list[str]:
+    base = str(symbol or "").strip()
+    candidates = [base]
+    if base.endswith("#"):
+        candidates.append(base.rstrip("#"))
+    elif base:
+        candidates.append(f"{base}#")
+    candidates.extend([item for item in FALLBACK_MT5_SYMBOLS if item.replace("#", "") == base.replace("#", "")])
+    unique = []
+    for candidate in candidates:
+        if candidate and candidate not in unique:
+            unique.append(candidate)
+    return unique
 
 
 def load_account() -> dict:
@@ -469,7 +484,7 @@ def optimizer_payload(data: dict) -> dict:
         "stop_points": scan_values(data, "stop_points_values", [400.0, 500.0, 300.0, 200.0], float),
         "first_trail_profit": scan_values(data, "first_trail_profit_values", [400.0, 700.0, 600.0, 500.0], float),
         "first_trail_lock_loss": scan_values(data, "first_trail_lock_values", [300.0, 400.0, 200.0], float),
-        "second_trail_profit": [700.0],
+        "second_trail_profit": scan_values(data, "second_trail_profit_values", [700.0], float),
     }
     if any(value < 0 for values in parameters.values() for value in values):
         raise ValueError("Optimizer point and percentage settings must not be negative.")
@@ -1321,6 +1336,8 @@ def clear_all_data():
 def run_backtest():
     if not csrf_is_valid():
         return jsonify({"error": "Invalid security token."}), 400
+    if algo_is_running():
+        return jsonify({"error": "Algo is running. Stop Algo first, then run backtest so live orders are not disturbed."}), 409
     data = request.get_json(force=True)
     try:
         source = normalize_source(data.get("data_source", "MT5"))
@@ -1556,7 +1573,24 @@ def candles():
         if not config.symbol:
             raise ValueError("Symbol is required.")
         validate_source_timeframe(source, config.timeframe)
-        df = fetch_source_rates(config)
+        try:
+            df = fetch_source_rates(config)
+        except RuntimeError as exc:
+            if source != "MT5" or "Symbol not available in MT5 Market Watch" not in str(exc):
+                raise
+            last_error = exc
+            df = None
+            for candidate in mt5_symbol_chart_candidates(config.symbol):
+                if candidate == config.symbol:
+                    continue
+                try:
+                    config.symbol = candidate
+                    df = fetch_source_rates(config)
+                    break
+                except RuntimeError as candidate_exc:
+                    last_error = candidate_exc
+            if df is None:
+                raise last_error
         rows = []
         for _, row in df.iterrows():
             rows.append(

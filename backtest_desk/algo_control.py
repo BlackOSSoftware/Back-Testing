@@ -69,6 +69,13 @@ def save_state(state: dict) -> dict:
     return state
 
 
+def algo_is_running() -> bool:
+    try:
+        return bool(load_state().get("running"))
+    except Exception:
+        return False
+
+
 def normalize_strategy(data: dict) -> dict:
     source = normalize_source(data.get("data_source", "MT5"))
     strategy = {
@@ -560,8 +567,12 @@ def update_state(state: dict, execute: bool) -> dict:
         return state
     signal = build_signal(strategy)
     state["last_signal"] = signal
+    state["last_error"] = ""
     today = now_ist().date().isoformat()
     if execute and state.get("running"):
+        if signal.get("phase") in {"BUILDING_RANGE", "NO_DATA"}:
+            set_algo_status(state, signal.get("message", "Waiting for candles."))
+            return state
         if state.get("pending_order_day") and state.get("pending_order_day") != today:
             cancel_pending_orders(strategy)
             state["pending_order_day"] = ""
@@ -632,7 +643,12 @@ def public_state(state: dict) -> dict:
         for item in state.get("trade_log", [])
         if str(item.get("time", "")).startswith(today) and (item.get("result") or {}).get("kind") != "PENDING"
     ]
-    return {**state, "active_strategy": active_strategy(state), "trades_today": len(trades_today), "recent_trades": list(reversed(state.get("trade_log", [])[-25:]))}
+    public = {**state}
+    signal_phase = (public.get("last_signal") or {}).get("phase")
+    status_text = str(public.get("algo_status", "")).lower()
+    if signal_phase in {"BUILDING_RANGE", "NO_DATA"} and "failed" not in status_text and "error" not in status_text:
+        public["last_error"] = ""
+    return {**public, "active_strategy": active_strategy(state), "trades_today": len(trades_today), "recent_trades": list(reversed(state.get("trade_log", [])[-25:]))}
 
 
 def worker_loop() -> None:

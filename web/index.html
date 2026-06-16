@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Personal Strategy Backtest Dashboard</title>
+    <script>
+      document.documentElement.dataset.page = location.pathname.startsWith("/optimizer") ? "optimizer" : "dashboard";
+    </script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <script src="/vendor/highcharts/highstock.js"></script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" />
@@ -24,7 +27,7 @@
           <a href="#analytics"><i data-lucide="bar-chart-3"></i> Analytics</a>
           <a href="#ratios"><i data-lucide="percent"></i> Ratios</a>
           <a href="#records"><i data-lucide="table-2"></i> Records</a>
-          <a href="#optimizer"><i data-lucide="search-check"></i> Optimizer</a>
+          <a href="/optimizer"><i data-lucide="search-check"></i> Optimizer</a>
           <a href="/algo"><i data-lucide="radio-tower"></i> Algo Control</a>
           <a href="/profile"><i data-lucide="user-round"></i> Profile</a>
         </nav>
@@ -80,7 +83,13 @@
               <h2>Strategy Setup</h2>
               <p>Select script, timeframe, date range, entry range and risk settings.</p>
             </div>
-            <span id="statusPill" class="status-pill">Ready</span>
+            <div class="panel-actions">
+              <button id="saveSetupStrategyBtn" class="secondary-btn" type="button">
+                <i data-lucide="save"></i>
+                Save Strategy
+              </button>
+              <span id="statusPill" class="status-pill">Ready</span>
+            </div>
           </div>
 
           <form id="backtestForm" class="form-grid">
@@ -159,6 +168,10 @@
               <span>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad BUY me entry ke upar aur SELL me entry ke neeche SL lock points.">?</button></span>
               <input name="first_trail_lock_loss" type="number" value="200" step="1" min="0" />
             </label>
+            <label>
+              <span>Second Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad previous 2 completed trail candles ke high/low se exit trailing active hoti hai.">?</button></span>
+              <input name="second_trail_profit" type="number" value="700" step="1" min="0" />
+            </label>
           </form>
           <div class="data-note">
             <span class="material-symbols-outlined">info</span>
@@ -166,7 +179,7 @@
           </div>
         </section>
 
-        <section id="optimizer" class="panel optimizer-panel">
+        <section id="optimizer" class="panel optimizer-panel optimizer-only">
           <div class="panel-title">
             <div>
               <h2>Strategy Optimizer</h2>
@@ -247,6 +260,10 @@
               <input name="first_trail_lock_values" value="300,400,200" placeholder="300,400,200" />
             </label>
             <label>
+              <span>Second Target Values <button class="info-btn" type="button" title="Comma-separated point values. Trade itne profit me aane ke baad 2 completed trail candles se exit trailing active hogi.">?</button></span>
+              <input name="second_trail_profit_values" value="700" placeholder="700,900,1200" />
+            </label>
+            <label>
               <span>Target Win Rate % <button class="info-btn" type="button" title="Optimizer setting ko qualified tab maanega jab win rate is percentage ke barabar ya upar ho.">?</button></span>
               <input name="target_win_rate" type="number" value="70" min="0" max="100" step="0.01" />
             </label>
@@ -319,9 +336,9 @@
           </div>
         </section>
 
-        <section id="analytics" class="metric-grid"></section>
+        <section id="analytics" class="metric-grid dashboard-only"></section>
 
-        <section class="dashboard-grid">
+        <section class="dashboard-grid dashboard-only">
           <div class="panel" id="ratios">
             <div class="panel-title compact">
               <div>
@@ -346,7 +363,7 @@
           </div>
         </section>
 
-        <section class="panel">
+        <section class="panel dashboard-only">
           <div class="panel-title table-title">
             <div>
               <h2>Points Breakdown</h2>
@@ -378,7 +395,7 @@
         </section>
         <div id="infoTooltip" class="info-tooltip" role="tooltip"></div>
 
-        <section id="chartPanel" class="panel">
+        <section id="chartPanel" class="panel dashboard-only">
           <div class="panel-title table-title">
             <div>
               <h2>Trade Candle Charts</h2>
@@ -443,7 +460,7 @@
           </div>
         </section>
 
-        <section id="records" class="panel">
+        <section id="records" class="panel dashboard-only">
           <div class="panel-title table-title">
             <div>
               <h2>Trade Records</h2>
@@ -512,6 +529,7 @@
 
       const initialReport = window.BACKTEST_REPORT || null;
       const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:5000" : "";
+      const isOptimizerPage = window.location.pathname.startsWith("/optimizer");
       const fmt = (value) => {
         if (value === null || value === undefined || value === "-") return "-";
         const number = Number(value);
@@ -528,6 +546,19 @@
         DATA_END: "Data End",
         SL: "SL (Old Result)",
       }[reason] || reason || "-");
+
+      function applyPageMode() {
+        const heading = document.querySelector(".topbar h1");
+        const kicker = document.querySelector(".topbar p");
+        if (isOptimizerPage) {
+          if (kicker) kicker.textContent = "Strategy Scan Workspace";
+          if (heading) heading.textContent = "Strategy Optimizer";
+        }
+        document.querySelectorAll(".side-nav a").forEach((link) => {
+          const href = link.getAttribute("href") || "";
+          link.classList.toggle("active", isOptimizerPage ? href === "/optimizer" : href === "#setup");
+        });
+      }
 
       function closeInfoTooltip() {
         document.getElementById("infoTooltip")?.classList.remove("open");
@@ -907,15 +938,17 @@
         }
       }
 
-      async function saveStrategyAndOpenAlgo() {
-        const button = document.getElementById("switchAlgoBtn");
+      async function saveStrategy(options = {}) {
+        const button = options.buttonId
+          ? document.getElementById(options.buttonId)
+          : document.getElementById("switchAlgoBtn");
         const values = collectForm();
         if (values.entry_cutoff < values.session_start || values.entry_cutoff > values.session_end) {
           setStatus("Last Entry Time must be between Session Start and Force Exit Time.", "error");
           return;
         }
         button.disabled = true;
-        setStatus("Saving strategy for algo...", "loading");
+        setStatus("Saving strategy...", "loading");
         try {
           await apiJson("/api/algo/strategies", {
             method: "POST",
@@ -925,12 +958,20 @@
               name: values.strategy_name?.trim() || `${values.symbol || "Strategy"} ${values.timeframe || "M5"}`,
             }),
           });
-          window.location.href = "/algo";
+          if (options.openAlgo) {
+            window.location.href = "/algo";
+          } else {
+            setStatus("Strategy saved", "ready");
+          }
         } catch (error) {
           setStatus(error.message, "error");
         } finally {
           button.disabled = false;
         }
+      }
+
+      async function saveStrategyAndOpenAlgo() {
+        await saveStrategy({ openAlgo: true });
       }
 
       async function clearAllData() {
@@ -994,7 +1035,7 @@
       }
 
       function optimizerSettingsText(row) {
-        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${fmt(row.stop_points)} | Trail ${fmt(row.first_trail_profit)}/${fmt(row.first_trail_lock_loss)}`;
+        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${fmt(row.stop_points)} | Trail ${fmt(row.first_trail_profit)}/${fmt(row.first_trail_lock_loss)} | Second ${fmt(row.second_trail_profit)}`;
       }
 
       function optimizerAveragePoints(row) {
@@ -1234,6 +1275,7 @@
           stop_points: row.stop_points,
           first_trail_profit: row.first_trail_profit,
           first_trail_lock_loss: row.first_trail_lock_loss,
+          second_trail_profit: row.second_trail_profit,
         };
         Object.entries(values).forEach(([name, value]) => {
           const input = document.querySelector(`#backtestForm [name="${name}"]`);
@@ -1258,8 +1300,16 @@
       }
 
       function resetPointsRange() {
-        pointsRange = { preset: "30", from: null, to: null };
-        document.getElementById("pointsPresetInput").value = "30";
+        const config = report?.config || {};
+        const trades = report?.trades || [];
+        pointsRange = {
+          preset: "custom",
+          from: config.from_date || trades[0]?.trade_date || null,
+          to: config.to_date || trades[trades.length - 1]?.trade_date || null,
+        };
+        document.getElementById("pointsPresetInput").value = "custom";
+        document.getElementById("pointsFromInput").value = pointsRange.from || "";
+        document.getElementById("pointsToInput").value = pointsRange.to || "";
       }
 
       function renderMetrics() {
@@ -1932,6 +1982,7 @@
       }
 
       document.getElementById("runBtn").addEventListener("click", runBacktest);
+      document.getElementById("saveSetupStrategyBtn").addEventListener("click", () => saveStrategy({ buttonId: "saveSetupStrategyBtn" }));
       document.getElementById("switchAlgoBtn").addEventListener("click", saveStrategyAndOpenAlgo);
       document.getElementById("clearAllDataBtn").addEventListener("click", clearAllData);
       initInfoButtons();
@@ -2211,6 +2262,7 @@
         await loadLatestOptimizer();
       }
 
+      applyPageMode();
       boot();
     </script>
   </body>
