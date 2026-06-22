@@ -141,31 +141,31 @@
             </label>
             <label>
               <span class="setup-label tone-amber"><i data-lucide="timer-reset"></i>Last Entry Time IST</span>
-              <input name="entry_cutoff" type="time" value="18:00" required />
+              <input name="entry_cutoff" type="time" value="19:00" required />
             </label>
             <label>
               <span class="setup-label tone-red"><i data-lucide="timer-off"></i>Force Exit Time IST</span>
-              <input name="session_end" type="time" value="19:30" required />
+              <input name="session_end" type="time" value="21:30" required />
             </label>
             <label>
               <span class="setup-label tone-blue"><i data-lucide="move-up-right"></i>Entry Buffer % <button class="info-btn" type="button" title="Range high ke upar ya range low ke neeche extra safety gap. Example 0.25 means 0.25 percent.">?</button></span>
-              <input name="entry_buffer_pct" type="number" value="0.25" step="0.01" min="0" />
+              <input name="entry_buffer_pct" type="number" value="0.02" step="0.01" min="0" />
             </label>
             <label>
               <span class="setup-label tone-red"><i data-lucide="shield-alert"></i>Stop Loss <button class="info-btn" type="button" title="Initial SL points distance. BUY me entry price minus stop loss; SELL me entry price plus stop loss. Example: entry 100000 and stop 750 means BUY SL 99250, SELL SL 100750.">?</button></span>
-              <input name="stop_points" type="number" value="400" step="1" min="0" />
+              <input name="stop_points" type="number" value="10" step="1" min="0" />
             </label>
             <label>
               <span class="setup-label tone-green"><i data-lucide="target"></i>First Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai. Exit nahi hota.">?</button></span>
-              <input name="first_trail_profit" type="number" value="400" step="1" min="0" />
+              <input name="first_trail_profit" type="number" value="10" step="1" min="0" />
             </label>
             <label>
               <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad BUY me entry ke upar aur SELL me entry ke neeche SL lock points.">?</button></span>
-              <input name="first_trail_lock_loss" type="number" value="300" step="1" min="0" />
+              <input name="first_trail_lock_loss" type="number" value="0" step="1" min="0" />
             </label>
             <label>
               <span class="setup-label tone-purple"><i data-lucide="flag-triangle-right"></i>Second Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad two-candle exit trail active hota hai. Example 700 means +700 points.">?</button></span>
-              <input name="second_trail_profit" type="number" value="700" step="1" min="0" />
+              <input name="second_trail_profit" type="number" value="20" step="1" min="0" />
             </label>
             <div class="setup-save-row">
               <button id="saveStrategyBtn" class="secondary-btn setup-save-btn" type="button">
@@ -2603,7 +2603,6 @@
           report = initialReport;
           selectedTrade = report.trades?.[0] || null;
           resetPointsRange();
-          fillFormFromReport();
           renderAll();
           await loadHistoryInfo();
           loadChartForSelectedTrade();

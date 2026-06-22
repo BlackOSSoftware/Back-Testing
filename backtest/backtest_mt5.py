@@ -47,6 +47,7 @@ TIMEFRAME_MINUTES = {
 
 RATES_CACHE_SECONDS = 60.0
 MT5_FETCH_CHUNK_DAYS = max(int(os.getenv("BACKTEST_MT5_CHUNK_DAYS", "30")), 1)
+PRICE_EPSILON = 1e-9
 _rates_cache: dict[tuple[str, str, date, date], tuple[float, pd.DataFrame]] = {}
 
 
@@ -186,12 +187,31 @@ def detect_broker_time_shift_hours(symbol: str) -> int:
 
 
 def current_and_previous_trail_position(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> int:
+    """Return the newest trail candle that is fully closed at candle_time."""
     cache_key = f"start_times_{timeframe.upper()}"
     start_times = candles.attrs.get(cache_key)
     if start_times is None:
         start_times = candles["time_ist"].reset_index(drop=True)
         candles.attrs[cache_key] = start_times
-    return int(start_times.searchsorted(pd.Timestamp(candle_time), side="right")) - 1
+    timeframe_minutes = TIMEFRAME_MINUTES[timeframe.upper()]
+    last_closed_start = pd.Timestamp(candle_time) - pd.Timedelta(minutes=timeframe_minutes)
+    return int(start_times.searchsorted(last_closed_start, side="right")) - 1
+
+
+def price_at_or_above(price: float, level: float) -> bool:
+    return price + PRICE_EPSILON >= level
+
+
+def price_at_or_below(price: float, level: float) -> bool:
+    return price <= level + PRICE_EPSILON
+
+
+def higher_stop(candidate: float, current: float) -> bool:
+    return candidate > current + PRICE_EPSILON
+
+
+def lower_stop(candidate: float, current: float) -> bool:
+    return candidate < current - PRICE_EPSILON
 
 
 def current_and_previous_low(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> float | None:
@@ -209,8 +229,8 @@ def current_and_previous_high(candles: pd.DataFrame, candle_time: datetime, time
 
 
 def choose_first_trigger(row: pd.Series, buy_trigger: float, sell_trigger: float, entry_pattern: str = "BOTH") -> str | None:
-    buy_hit = float(row["high"]) >= buy_trigger
-    sell_hit = float(row["low"]) <= sell_trigger
+    buy_hit = price_at_or_above(float(row["high"]), buy_trigger)
+    sell_hit = price_at_or_below(float(row["low"]), sell_trigger)
     pattern = (entry_pattern or "BOTH").upper()
 
     if pattern == "BUY_ONLY":
@@ -277,23 +297,29 @@ def manage_buy_trade(
         mfe = max(mfe, high - entry_price)
         mae = min(mae, low - entry_price)
 
-        if low <= stop:
+        if second_trail_active:
+            trail = current_and_previous_low(trail_candles, candle_time, config.trail_timeframe)
+            if trail is not None and higher_stop(trail, stop):
+                stop = trail
+                stop_reason = "TWO_CANDLE_TRAIL_SL"
+                two_candle_trail_time = candle_time.isoformat()
+                two_candle_trail_sl = stop
+
+        if price_at_or_below(low, stop):
             return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
-        if high >= entry_price + config.first_trail_profit:
+        if price_at_or_above(high, entry_price + config.first_trail_profit):
             first_trail_stop = entry_price + config.first_trail_lock_loss
-            if first_trail_stop > stop:
+            if higher_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
                 first_trail_time = candle_time.isoformat()
                 first_trail_sl = stop
 
-        if high >= entry_price + config.second_trail_profit:
+        if price_at_or_above(high, entry_price + config.second_trail_profit) and not second_trail_active:
             second_trail_active = True
-
-        if second_trail_active:
             trail = current_and_previous_low(trail_candles, candle_time, config.trail_timeframe)
-            if trail is not None and trail > stop:
+            if trail is not None and higher_stop(trail, stop):
                 stop = trail
                 stop_reason = "TWO_CANDLE_TRAIL_SL"
                 two_candle_trail_time = candle_time.isoformat()
@@ -333,23 +359,29 @@ def manage_sell_trade(
         mfe = max(mfe, entry_price - low)
         mae = min(mae, entry_price - high)
 
-        if high >= stop:
+        if second_trail_active:
+            trail = current_and_previous_high(trail_candles, candle_time, config.trail_timeframe)
+            if trail is not None and lower_stop(trail, stop):
+                stop = trail
+                stop_reason = "TWO_CANDLE_TRAIL_SL"
+                two_candle_trail_time = candle_time.isoformat()
+                two_candle_trail_sl = stop
+
+        if price_at_or_above(high, stop):
             return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
-        if low <= entry_price - config.first_trail_profit:
+        if price_at_or_below(low, entry_price - config.first_trail_profit):
             first_trail_stop = entry_price - config.first_trail_lock_loss
-            if first_trail_stop < stop:
+            if lower_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
                 first_trail_time = candle_time.isoformat()
                 first_trail_sl = stop
 
-        if low <= entry_price - config.second_trail_profit:
+        if price_at_or_below(low, entry_price - config.second_trail_profit) and not second_trail_active:
             second_trail_active = True
-
-        if second_trail_active:
             trail = current_and_previous_high(trail_candles, candle_time, config.trail_timeframe)
-            if trail is not None and trail < stop:
+            if trail is not None and lower_stop(trail, stop):
                 stop = trail
                 stop_reason = "TWO_CANDLE_TRAIL_SL"
                 two_candle_trail_time = candle_time.isoformat()

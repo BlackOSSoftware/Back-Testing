@@ -6,7 +6,7 @@ from datetime import time
 import numpy as np
 import pandas as pd
 
-from .backtest_mt5 import BacktestConfig
+from .backtest_mt5 import BacktestConfig, PRICE_EPSILON, TIMEFRAME_MINUTES
 
 try:
     from numba import njit, prange
@@ -336,7 +336,8 @@ def build_scan_context(layout: EntryLayout, trail_df: pd.DataFrame, trail_timefr
             }
             trail_df.attrs[cache_key] = cached
         start_times = cached["start_times"]
-        positions = np.searchsorted(start_times, layout.times_ns, side="right") - 1
+        timeframe_ns = TIMEFRAME_MINUTES[trail_timeframe.upper()] * 60 * 1_000_000_000
+        positions = np.searchsorted(start_times, layout.times_ns - timeframe_ns, side="right") - 1
         eligible = positions >= 1
         indices = positions[eligible]
         lows = cached["lows"]
@@ -375,6 +376,7 @@ def _evaluate_kernel(
     running = 0.0
     peak = 0.0
     max_drawdown = 0.0
+    eps = PRICE_EPSILON
     for day in range(len(day_starts)):
         start = day_starts[day]
         end = day_ends[day]
@@ -383,8 +385,8 @@ def _evaluate_kernel(
         side = 0
         entry_idx = -1
         for idx in range(start, cutoff_ends[day]):
-            buy_hit = highs[idx] >= buy_trigger
-            sell_hit = lows[idx] <= sell_trigger
+            buy_hit = highs[idx] + eps >= buy_trigger
+            sell_hit = lows[idx] <= sell_trigger + eps
             if side_filter == 1:
                 if buy_hit:
                     side = 1
@@ -408,32 +410,38 @@ def _evaluate_kernel(
         second_trail_active = False
         for idx in range(entry_idx, end):
             if side == 1:
-                if lows[idx] <= stop:
-                    exit_price = stop
-                    break
-                if highs[idx] >= entry_price + first_trail_profit:
-                    candidate = entry_price + first_trail_lock_loss
-                    if candidate > stop:
-                        stop = candidate
-                if highs[idx] >= entry_price + second_trail_profit:
-                    second_trail_active = True
                 if second_trail_active:
                     candidate = trail_lows[idx]
-                    if not np.isnan(candidate) and candidate > stop:
+                    if not np.isnan(candidate) and candidate > stop + eps:
                         stop = candidate
-            else:
-                if highs[idx] >= stop:
+                if lows[idx] <= stop + eps:
                     exit_price = stop
                     break
-                if lows[idx] <= entry_price - first_trail_profit:
-                    candidate = entry_price - first_trail_lock_loss
-                    if candidate < stop:
+                if highs[idx] + eps >= entry_price + first_trail_profit:
+                    candidate = entry_price + first_trail_lock_loss
+                    if candidate > stop + eps:
                         stop = candidate
-                if lows[idx] <= entry_price - second_trail_profit:
+                if highs[idx] + eps >= entry_price + second_trail_profit and not second_trail_active:
                     second_trail_active = True
+                    candidate = trail_lows[idx]
+                    if not np.isnan(candidate) and candidate > stop + eps:
+                        stop = candidate
+            else:
                 if second_trail_active:
                     candidate = trail_highs[idx]
-                    if not np.isnan(candidate) and candidate < stop:
+                    if not np.isnan(candidate) and candidate < stop - eps:
+                        stop = candidate
+                if highs[idx] + eps >= stop:
+                    exit_price = stop
+                    break
+                if lows[idx] <= entry_price - first_trail_profit + eps:
+                    candidate = entry_price - first_trail_lock_loss
+                    if candidate < stop - eps:
+                        stop = candidate
+                if lows[idx] <= entry_price - second_trail_profit + eps and not second_trail_active:
+                    second_trail_active = True
+                    candidate = trail_highs[idx]
+                    if not np.isnan(candidate) and candidate < stop - eps:
                         stop = candidate
             if at_session_end[idx]:
                 exit_price = closes[idx]
