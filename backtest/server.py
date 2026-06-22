@@ -7,6 +7,7 @@ import os
 import re
 import secrets
 import shutil
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
 from dataclasses import replace
@@ -25,6 +26,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
 from werkzeug.security import check_password_hash, generate_password_hash
 
+if __package__ in {None, ""}:
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+    __package__ = "backtest"
+
 from .app_paths import CACHE_DIR, DATA_DIR, INSTANCE_DIR, REPORT_DATA_FILE, RESOURCE_DIR, RESULTS_DIR, prepare_runtime
 from .backtest_mt5 import BacktestConfig, TIMEFRAME_MINUTES, TIMEFRAMES, backtest, build_summary, clear_rates_cache, fetch_rates, parse_date, parse_time, write_outputs
 from .market_data import (
@@ -38,7 +43,6 @@ from .market_data import (
     validate_source_timeframe,
 )
 from .optimizer_engine import ScanContext, build_entry_layout, build_scan_context, evaluate_scan_batch, warm_optimizer_engine
-from .algo_control import algo_is_running, create_algo_blueprint
 
 
 prepare_runtime()
@@ -97,21 +101,6 @@ OPTIMIZER_ENTRY_PATTERNS = {
 }
 OPTIMIZER_RESULT_SORTS = {"BALANCED", "WIN_RATE", "NET_POINTS", "LOWEST_TRADES", "WIN_POINTS"}
 FALLBACK_MT5_SYMBOLS = ["BTCUSD#", "BTCUSD", "ETHUSD", "XAUUSD", "XAGUSD", "US30", "NAS100", "SPX500"]
-
-
-def mt5_symbol_chart_candidates(symbol: str) -> list[str]:
-    base = str(symbol or "").strip()
-    candidates = [base]
-    if base.endswith("#"):
-        candidates.append(base.rstrip("#"))
-    elif base:
-        candidates.append(f"{base}#")
-    candidates.extend([item for item in FALLBACK_MT5_SYMBOLS if item.replace("#", "") == base.replace("#", "")])
-    unique = []
-    for candidate in candidates:
-        if candidate and candidate not in unique:
-            unique.append(candidate)
-    return unique
 
 
 def load_account() -> dict:
@@ -254,9 +243,6 @@ def auth_required(view):
         return redirect(url_for("login", next=request.full_path.rstrip("?")))
 
     return wrapped
-
-
-app.register_blueprint(create_algo_blueprint(auth_required, csrf_is_valid))
 
 
 def serialized_saved_data_write(view):
@@ -465,7 +451,7 @@ def scan_time_profiles(data: dict) -> list[dict]:
 
 
 def optimizer_payload(data: dict) -> dict:
-    source = normalize_source(data.get("data_source", "MT5"))
+    source = normalize_source(data.get("data_source", "DELTA"))
     symbol = str(data.get("symbol", "")).strip()
     if not symbol:
         raise ValueError("Symbol is required.")
@@ -1157,7 +1143,7 @@ def defaults():
             "sources": SOURCES,
             "source_timeframes": SOURCE_TIMEFRAMES,
             "defaults": {
-                "data_source": "MT5",
+                "data_source": "DELTA",
                 "timeframe": "M5",
                 "trail_timeframe": "M15",
                 "symbol": "BTCUSD",
@@ -1168,9 +1154,9 @@ def defaults():
                 "entry_cutoff": "18:00",
                 "session_end": "19:30",
                 "entry_buffer_pct": 0.25,
-                "stop_points": 500,
+                "stop_points": 400,
                 "first_trail_profit": 400,
-                "first_trail_lock_loss": 200,
+                "first_trail_lock_loss": 300,
                 "second_trail_profit": 700,
             },
         }
@@ -1181,7 +1167,7 @@ def defaults():
 @auth_required
 def symbols():
     try:
-        source = normalize_source(request.args.get("source", "MT5"))
+        source = normalize_source(request.args.get("source", "DELTA"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     if source == "DELTA":
@@ -1211,7 +1197,7 @@ def symbols():
 @auth_required
 def history_range():
     try:
-        source = normalize_source(request.args.get("source", "MT5"))
+        source = normalize_source(request.args.get("source", "DELTA"))
     except ValueError as exc:
         return jsonify({"error": str(exc)}), 400
     symbol = request.args.get("symbol", "BTCUSD").strip()
@@ -1274,7 +1260,7 @@ def history_range():
 @auth_required
 def export_excel():
     try:
-        summary = load_latest_summary(request.args.get("source", "MT5"))
+        summary = load_latest_summary(request.args.get("source", "DELTA"))
         workbook = Workbook()
         default_sheet = workbook.active
         workbook.remove(default_sheet)
@@ -1336,18 +1322,16 @@ def clear_all_data():
 def run_backtest():
     if not csrf_is_valid():
         return jsonify({"error": "Invalid security token."}), 400
-    if algo_is_running():
-        return jsonify({"error": "Algo is running. Stop Algo first, then run backtest so live orders are not disturbed."}), 409
     data = request.get_json(force=True)
     try:
-        source = normalize_source(data.get("data_source", "MT5"))
+        source = normalize_source(data.get("data_source", "DELTA"))
         config = BacktestConfig(
             symbol=str(data.get("symbol", "")).strip(),
             from_date=parse_date(data["from_date"]),
             to_date=parse_date(data["to_date"]),
             data_source=source,
             timeframe=str(data.get("timeframe", "M5")).upper(),
-            trail_timeframe=str(data.get("trail_timeframe", data.get("timeframe", "M5"))).upper(),
+            trail_timeframe=str(data.get("trail_timeframe", "M15")).upper(),
             entry_pattern=str(data.get("entry_pattern", "BOTH")).upper(),
             range_start=parse_time(data.get("range_start", "08:30")),
             range_end=parse_time(data.get("range_end", "09:30")),
@@ -1355,9 +1339,9 @@ def run_backtest():
             entry_cutoff=parse_time(data.get("entry_cutoff", "18:00")),
             session_end=parse_time(data.get("session_end", "19:30")),
             entry_buffer_pct=float(data.get("entry_buffer_pct", 0.25)) / 100,
-            stop_points=float(data.get("stop_points", 500)),
+            stop_points=float(data.get("stop_points", 400)),
             first_trail_profit=float(data.get("first_trail_profit", 400)),
-            first_trail_lock_loss=float(data.get("first_trail_lock_loss", 200)),
+            first_trail_lock_loss=float(data.get("first_trail_lock_loss", 300)),
             second_trail_profit=float(data.get("second_trail_profit", 700)),
         )
         if not config.symbol:
@@ -1388,7 +1372,18 @@ def run_backtest():
                 timeframe=config.trail_timeframe,
             )
             trail_df = fetch_source_rates(trail_config)
-        trades = backtest(df, config, trail_df)
+        if config.timeframe == "M1":
+            execution_df = df
+        else:
+            execution_config = BacktestConfig(
+                symbol=config.symbol,
+                from_date=config.from_date,
+                to_date=config.to_date,
+                data_source=config.data_source,
+                timeframe="M1",
+            )
+            execution_df = fetch_source_rates(execution_config)
+        trades = backtest(df, config, trail_df, execution_df)
         summary = build_summary(trades, config)
         write_outputs(summary)
         return jsonify(summary)
@@ -1479,7 +1474,7 @@ def optimizer_job(job_id: str):
 @auth_required
 def optimizer_scans():
     try:
-        source = normalize_source(request.args.get("source", "MT5"))
+        source = normalize_source(request.args.get("source", "DELTA"))
         symbol = request.args.get("symbol", "").strip()
         if not symbol:
             raise ValueError("Symbol is required.")
@@ -1494,7 +1489,7 @@ def optimizer_scans():
 @auth_required
 def saved_optimizer_scan(scan_id: str):
     try:
-        source = normalize_source(request.args.get("source", "MT5"))
+        source = normalize_source(request.args.get("source", "DELTA"))
         symbol = request.args.get("symbol", "").strip()
         if not symbol:
             raise ValueError("Symbol is required.")
@@ -1516,7 +1511,7 @@ def saved_optimizer_scan(scan_id: str):
 @auth_required
 def latest_optimizer():
     try:
-        source = normalize_source(request.args.get("source", "MT5"))
+        source = normalize_source(request.args.get("source", "DELTA"))
         symbol = request.args.get("symbol", "").strip()
         if not symbol:
             raise ValueError("Symbol is required.")
@@ -1532,7 +1527,7 @@ def latest_optimizer():
 @auth_required
 def export_optimizer():
     try:
-        source = normalize_source(request.args.get("source", "MT5"))
+        source = normalize_source(request.args.get("source", "DELTA"))
         symbol = request.args.get("symbol", "").strip()
         if not symbol:
             raise ValueError("Symbol is required.")
@@ -1560,7 +1555,7 @@ def candles():
         return jsonify({"error": "Invalid security token."}), 400
     data = request.args.to_dict() if request.method == "GET" else request.get_json(force=True)
     try:
-        source = normalize_source(data.get("data_source", "MT5"))
+        source = normalize_source(data.get("data_source", "DELTA"))
         from_date = parse_date(data.get("from_date") or data["trade_date"])
         to_date = parse_date(data.get("to_date") or data.get("trade_date") or data["from_date"])
         config = BacktestConfig(
@@ -1573,24 +1568,7 @@ def candles():
         if not config.symbol:
             raise ValueError("Symbol is required.")
         validate_source_timeframe(source, config.timeframe)
-        try:
-            df = fetch_source_rates(config)
-        except RuntimeError as exc:
-            if source != "MT5" or "Symbol not available in MT5 Market Watch" not in str(exc):
-                raise
-            last_error = exc
-            df = None
-            for candidate in mt5_symbol_chart_candidates(config.symbol):
-                if candidate == config.symbol:
-                    continue
-                try:
-                    config.symbol = candidate
-                    df = fetch_source_rates(config)
-                    break
-                except RuntimeError as candidate_exc:
-                    last_error = candidate_exc
-            if df is None:
-                raise last_error
+        df = fetch_source_rates(config)
         rows = []
         for _, row in df.iterrows():
             rows.append(
@@ -1650,6 +1628,10 @@ def latest_report_javascript():
 @app.get("/<path:path>")
 @auth_required
 def static_files(path: str):
+    if path == "algo" or path in {"algo.css", "algo.js"} or path.startswith("api/algo"):
+        if path.startswith("api/"):
+            return jsonify({"error": "Algo runs as a separate app."}), 404
+        return ("Algo runs as a separate app.", 404)
     return send_from_directory(RESOURCE_DIR, "index.html")
 
 

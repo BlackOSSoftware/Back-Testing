@@ -4,11 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Personal Strategy Backtest Dashboard</title>
-    <script>
-      document.documentElement.dataset.page = location.pathname.startsWith("/optimizer") ? "optimizer" : "dashboard";
-    </script>
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
     <script src="/vendor/highcharts/highstock.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" />
     <link rel="stylesheet" href="styles.css" />
   </head>
@@ -27,8 +25,7 @@
           <a href="#analytics"><i data-lucide="bar-chart-3"></i> Analytics</a>
           <a href="#ratios"><i data-lucide="percent"></i> Ratios</a>
           <a href="#records"><i data-lucide="table-2"></i> Records</a>
-          <a href="/optimizer"><i data-lucide="search-check"></i> Optimizer</a>
-          <a href="/algo"><i data-lucide="radio-tower"></i> Algo Control</a>
+          <a href="#optimizer"><i data-lucide="search-check"></i> Optimizer</a>
           <a href="/profile"><i data-lucide="user-round"></i> Profile</a>
         </nav>
         <div class="side-card">
@@ -62,10 +59,6 @@
               <i data-lucide="play"></i>
               Run Backtest
             </button>
-            <button id="switchAlgoBtn" class="secondary-btn" type="button">
-              <i data-lucide="radio-tower"></i>
-              Switch to Algo
-            </button>
             <button id="clearAllDataBtn" class="secondary-btn danger-btn" type="button">
               <i data-lucide="trash-2"></i>
               Clear All Data
@@ -83,41 +76,43 @@
               <h2>Strategy Setup</h2>
               <p>Select script, timeframe, date range, entry range and risk settings.</p>
             </div>
-            <div class="panel-actions">
-              <button id="saveSetupStrategyBtn" class="secondary-btn" type="button">
-                <i data-lucide="save"></i>
-                Save Strategy
-              </button>
-              <span id="statusPill" class="status-pill">Ready</span>
+            <span id="statusPill" class="status-pill">Ready</span>
+          </div>
+
+          <div class="strategy-toolbar">
+            <div class="saved-strategy-combo">
+              <span class="setup-label tone-slate"><i data-lucide="archive"></i>Saved Strategy</span>
+              <div class="saved-strategy-picker">
+                <input id="savedStrategySearch" type="search" autocomplete="off" placeholder="Search saved strategy..." />
+                <div id="savedStrategiesList" class="saved-strategy-menu">
+                  <div class="saved-strategy-empty">No saved strategies</div>
+                </div>
+              </div>
             </div>
           </div>
 
           <form id="backtestForm" class="form-grid">
             <label>
-              <span>Data Source</span>
+              <span class="setup-label tone-blue"><i data-lucide="database"></i>Data Source</span>
               <select id="dataSourceInput" name="data_source"></select>
             </label>
             <label>
-              <span>Script / Symbol</span>
+              <span class="setup-label tone-green"><i data-lucide="search"></i>Script / Symbol</span>
               <div class="symbol-combo">
                 <input id="symbolInput" name="symbol" autocomplete="off" placeholder="Search symbol..." required />
                 <div id="symbolMenu" class="symbol-menu"></div>
               </div>
             </label>
             <label>
-              <span>Strategy Name</span>
-              <input id="strategyNameInput" name="strategy_name" autocomplete="off" placeholder="Morning breakout M5" />
-            </label>
-            <label>
-              <span>Entry Candle Timeframe</span>
+              <span class="setup-label tone-orange"><i data-lucide="candlestick-chart"></i>Entry Candle Timeframe</span>
               <select id="timeframeInput" name="timeframe"></select>
             </label>
             <label>
-              <span>+700 Exit Trail Candle Timeframe</span>
+              <span class="setup-label tone-purple"><i data-lucide="line-chart"></i>Second Target Exit Trail Candle Timeframe</span>
               <select id="trailTimeframeInput" name="trail_timeframe"></select>
             </label>
             <label>
-              <span>Entry Pattern</span>
+              <span class="setup-label tone-cyan"><i data-lucide="split"></i>Entry Pattern</span>
               <select id="entryPatternInput" name="entry_pattern">
                 <option value="BOTH" selected>Both</option>
                 <option value="BUY_ONLY">Buy only</option>
@@ -125,53 +120,59 @@
               </select>
             </label>
             <label>
-              <span>From Date</span>
+              <span class="setup-label tone-pink"><i data-lucide="calendar-days"></i>From Date</span>
               <input id="fromDateInput" name="from_date" type="date" required />
             </label>
             <label>
-              <span>To Date</span>
+              <span class="setup-label tone-pink"><i data-lucide="calendar-check"></i>To Date</span>
               <input id="toDateInput" name="to_date" type="date" required />
             </label>
             <label>
-              <span>Range Start IST</span>
+              <span class="setup-label tone-teal"><i data-lucide="clock-3"></i>Range Start IST</span>
               <input name="range_start" type="time" value="08:30" required />
             </label>
             <label>
-              <span>Range End IST</span>
+              <span class="setup-label tone-teal"><i data-lucide="clock-4"></i>Range End IST</span>
               <input name="range_end" type="time" value="09:30" required />
             </label>
             <label>
-              <span>Session Start IST</span>
+              <span class="setup-label tone-emerald"><i data-lucide="play"></i>Session Start IST</span>
               <input name="session_start" type="time" value="09:30" required />
             </label>
             <label>
-              <span>Last Entry Time IST</span>
+              <span class="setup-label tone-amber"><i data-lucide="timer-reset"></i>Last Entry Time IST</span>
               <input name="entry_cutoff" type="time" value="18:00" required />
             </label>
             <label>
-              <span>Force Exit Time IST</span>
+              <span class="setup-label tone-red"><i data-lucide="timer-off"></i>Force Exit Time IST</span>
               <input name="session_end" type="time" value="19:30" required />
             </label>
             <label>
-              <span>Entry Buffer % <button class="info-btn" type="button" title="Range high ke upar ya range low ke neeche extra safety gap. Example 0.25 means 0.25 percent.">?</button></span>
+              <span class="setup-label tone-blue"><i data-lucide="move-up-right"></i>Entry Buffer % <button class="info-btn" type="button" title="Range high ke upar ya range low ke neeche extra safety gap. Example 0.25 means 0.25 percent.">?</button></span>
               <input name="entry_buffer_pct" type="number" value="0.25" step="0.01" min="0" />
             </label>
             <label>
-              <span>Stop Loss <button class="info-btn" type="button" title="Initial SL points distance. BUY me entry price minus stop loss; SELL me entry price plus stop loss. Example: entry 100000 and stop 750 means BUY SL 99250, SELL SL 100750.">?</button></span>
-              <input name="stop_points" type="number" value="500" step="1" min="0" />
+              <span class="setup-label tone-red"><i data-lucide="shield-alert"></i>Stop Loss <button class="info-btn" type="button" title="Initial SL points distance. BUY me entry price minus stop loss; SELL me entry price plus stop loss. Example: entry 100000 and stop 750 means BUY SL 99250, SELL SL 100750.">?</button></span>
+              <input name="stop_points" type="number" value="400" step="1" min="0" />
             </label>
             <label>
-              <span>First Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai. Exit nahi hota.">?</button></span>
+              <span class="setup-label tone-green"><i data-lucide="target"></i>First Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai. Exit nahi hota.">?</button></span>
               <input name="first_trail_profit" type="number" value="400" step="1" min="0" />
             </label>
             <label>
-              <span>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad BUY me entry ke upar aur SELL me entry ke neeche SL lock points.">?</button></span>
-              <input name="first_trail_lock_loss" type="number" value="200" step="1" min="0" />
+              <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad BUY me entry ke upar aur SELL me entry ke neeche SL lock points.">?</button></span>
+              <input name="first_trail_lock_loss" type="number" value="300" step="1" min="0" />
             </label>
             <label>
-              <span>Second Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad previous 2 completed trail candles ke high/low se exit trailing active hoti hai.">?</button></span>
+              <span class="setup-label tone-purple"><i data-lucide="flag-triangle-right"></i>Second Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad two-candle exit trail active hota hai. Example 700 means +700 points.">?</button></span>
               <input name="second_trail_profit" type="number" value="700" step="1" min="0" />
             </label>
+            <div class="setup-save-row">
+              <button id="saveStrategyBtn" class="secondary-btn setup-save-btn" type="button">
+                <i data-lucide="save"></i>
+                Save Current Setup
+              </button>
+            </div>
           </form>
           <div class="data-note">
             <span class="material-symbols-outlined">info</span>
@@ -179,7 +180,7 @@
           </div>
         </section>
 
-        <section id="optimizer" class="panel optimizer-panel optimizer-only">
+        <section id="optimizer" class="panel optimizer-panel">
           <div class="panel-title">
             <div>
               <h2>Strategy Optimizer</h2>
@@ -260,8 +261,8 @@
               <input name="first_trail_lock_values" value="300,400,200" placeholder="300,400,200" />
             </label>
             <label>
-              <span>Second Target Values <button class="info-btn" type="button" title="Comma-separated point values. Trade itne profit me aane ke baad 2 completed trail candles se exit trailing active hogi.">?</button></span>
-              <input name="second_trail_profit_values" value="700" placeholder="700,900,1200" />
+              <span>Second Target Values <button class="info-btn" type="button" title="Two-candle exit trail activate karne ke profit point values. Comma-separated values optimizer test karega.">?</button></span>
+              <input name="second_trail_profit_values" value="700" placeholder="700,800,1000" />
             </label>
             <label>
               <span>Target Win Rate % <button class="info-btn" type="button" title="Optimizer setting ko qualified tab maanega jab win rate is percentage ke barabar ya upar ho.">?</button></span>
@@ -336,9 +337,9 @@
           </div>
         </section>
 
-        <section id="analytics" class="metric-grid dashboard-only"></section>
+        <section id="analytics" class="metric-grid"></section>
 
-        <section class="dashboard-grid dashboard-only">
+        <section class="dashboard-grid">
           <div class="panel" id="ratios">
             <div class="panel-title compact">
               <div>
@@ -363,7 +364,7 @@
           </div>
         </section>
 
-        <section class="panel dashboard-only">
+        <section class="panel">
           <div class="panel-title table-title">
             <div>
               <h2>Points Breakdown</h2>
@@ -395,7 +396,7 @@
         </section>
         <div id="infoTooltip" class="info-tooltip" role="tooltip"></div>
 
-        <section id="chartPanel" class="panel dashboard-only">
+        <section id="chartPanel" class="panel">
           <div class="panel-title table-title">
             <div>
               <h2>Trade Candle Charts</h2>
@@ -418,11 +419,6 @@
                 <span>Height</span>
                 <input id="chartHeightInput" type="range" min="320" max="760" step="20" value="430" />
               </label>
-              <div class="zoom-controls" aria-label="Candle chart zoom controls">
-                <button id="zoomOutChartBtn" class="zoom-btn" type="button" aria-label="Zoom out candles">-</button>
-                <button id="zoomInChartBtn" class="zoom-btn" type="button" aria-label="Zoom in candles">+</button>
-                <button id="fitChartBtn" class="ghost-btn" type="button">Fit</button>
-              </div>
             </div>
           </div>
           <div class="chart-tags">
@@ -450,7 +446,13 @@
             <article class="candle-card">
               <div class="candle-card-title">
                 <h3>Exit Trail Candle Chart</h3>
-                <span id="exitChartTimeframe">-</span>
+                <div class="candle-title-actions">
+                  <span id="exitChartTimeframe">-</span>
+                  <div class="mini-segmented" aria-label="Exit chart candle timeframe">
+                    <button id="exitTrailTfBtn" class="exit-chart-tf active" data-exit-chart-mode="trail" type="button">Trail</button>
+                    <button id="exitOneMinuteTfBtn" class="exit-chart-tf" data-exit-chart-mode="M1" type="button">1m</button>
+                  </div>
+                </div>
               </div>
               <div class="chart-shell">
                 <div id="exitCandleChart" class="candle-chart"></div>
@@ -460,7 +462,7 @@
           </div>
         </section>
 
-        <section id="records" class="panel dashboard-only">
+        <section id="records" class="panel">
           <div class="panel-title table-title">
             <div>
               <h2>Trade Records</h2>
@@ -485,6 +487,9 @@
                   <th class="num"><button class="sort-btn" data-sort="range_high" type="button">Range High <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="range_low" type="button">Range Low <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="entry_price" type="button">Entry <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="initial_sl" type="button">Initial SL <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="first_trail_sl" type="button">First SL <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="two_candle_trail_sl" type="button">2-Candle SL <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="exit_price" type="button">Exit <span></span></button></th>
                   <th><button class="sort-btn" data-sort="exit_reason" type="button">Exit Rule <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="pnl_points" type="button">P&L <span></span></button></th>
@@ -499,6 +504,52 @@
       </main>
     </div>
 
+    <div id="saveStrategyModal" class="modal-backdrop" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="saveStrategyTitle">
+        <div class="modal-title">
+          <div>
+            <h3 id="saveStrategyTitle">Save Strategy</h3>
+            <p>Name this setup so you can load it quickly later.</p>
+          </div>
+          <button id="closeSaveStrategyModalBtn" class="icon-btn" type="button" aria-label="Close save strategy popup">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <label class="modal-field">
+          <span>Strategy Name</span>
+          <input id="strategySaveNameInput" autocomplete="off" placeholder="BTCUSD M5 breakout" />
+        </label>
+        <div class="modal-actions">
+          <button id="cancelSaveStrategyBtn" class="secondary-btn" type="button">Cancel</button>
+          <button id="confirmSaveStrategyBtn" class="primary-btn" type="button">
+            <i data-lucide="save"></i>
+            Save Strategy
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div id="deleteStrategyModal" class="modal-backdrop" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="deleteStrategyTitle">
+        <div class="modal-title">
+          <div>
+            <h3 id="deleteStrategyTitle">Delete Strategy</h3>
+            <p id="deleteStrategyText">This saved setup will be removed from your browser.</p>
+          </div>
+          <button id="closeDeleteStrategyModalBtn" class="icon-btn" type="button" aria-label="Close delete strategy popup">
+            <i data-lucide="x"></i>
+          </button>
+        </div>
+        <div class="modal-actions">
+          <button id="cancelDeleteStrategyBtn" class="secondary-btn" type="button">Cancel</button>
+          <button id="confirmDeleteStrategyBtn" class="secondary-btn danger-btn" type="button">
+            <i data-lucide="trash-2"></i>
+            Delete Strategy
+          </button>
+        </div>
+      </div>
+    </div>
+
     <script src="report_data.js"></script>
     <script>
       let report = null;
@@ -510,6 +561,7 @@
       let exitCandleChart = null;
       let chartMode = "day";
       let chartWindowStart = null;
+      let exitChartMode = "trail";
       let availableSymbols = [];
       let pointsMode = "day";
       let pointsRange = { preset: "30", from: null, to: null };
@@ -525,11 +577,13 @@
       let optimizerSortState = { key: "rank", direction: "asc" };
       let tradeRowsLimit = 100;
       let csrfToken = "";
+      let pendingDeleteStrategyId = "";
+      let activeSavedStrategyId = "";
       const TRADE_ROWS_BATCH = 100;
 
       const initialReport = window.BACKTEST_REPORT || null;
       const API_BASE = window.location.protocol === "file:" ? "http://127.0.0.1:5000" : "";
-      const isOptimizerPage = window.location.pathname.startsWith("/optimizer");
+      const STRATEGY_STORAGE_KEY = "backtest.savedStrategies.v1";
       const fmt = (value) => {
         if (value === null || value === undefined || value === "-") return "-";
         const number = Number(value);
@@ -537,6 +591,13 @@
       };
       const tone = (value) => (Number(value) >= 0 ? "positive" : "negative");
       const timeOnly = (value) => value ? new Date(value).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false }) : "-";
+      const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      }[char]));
       const exitLabel = (reason) => ({
         INITIAL_SL: "Initial SL",
         FIRST_TRAIL_SL: "First Trail SL",
@@ -546,19 +607,6 @@
         DATA_END: "Data End",
         SL: "SL (Old Result)",
       }[reason] || reason || "-");
-
-      function applyPageMode() {
-        const heading = document.querySelector(".topbar h1");
-        const kicker = document.querySelector(".topbar p");
-        if (isOptimizerPage) {
-          if (kicker) kicker.textContent = "Strategy Scan Workspace";
-          if (heading) heading.textContent = "Strategy Optimizer";
-        }
-        document.querySelectorAll(".side-nav a").forEach((link) => {
-          const href = link.getAttribute("href") || "";
-          link.classList.toggle("active", isOptimizerPage ? href === "/optimizer" : href === "#setup");
-        });
-      }
 
       function closeInfoTooltip() {
         document.getElementById("infoTooltip")?.classList.remove("open");
@@ -659,13 +707,12 @@
       function fillFormFromReport() {
         if (!report?.config) return;
         const cfg = report.config;
-        document.getElementById("dataSourceInput").value = cfg.data_source || "MT5";
-        updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M5");
+        document.getElementById("dataSourceInput").value = cfg.data_source || "DELTA";
+        updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M15");
         fillOptimizerTimeframes();
         document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD";
-        document.getElementById("strategyNameInput").value = cfg.strategy_name || `${cfg.symbol || "BTCUSD"} ${cfg.timeframe || "M5"} breakout`;
         document.getElementById("timeframeInput").value = cfg.timeframe || "M5";
-        document.getElementById("trailTimeframeInput").value = cfg.trail_timeframe || cfg.timeframe || "M5";
+        document.getElementById("trailTimeframeInput").value = cfg.trail_timeframe || cfg.timeframe || "M15";
         document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
         document.getElementById("fromDateInput").value = cfg.from_date || "";
         document.getElementById("toDateInput").value = cfg.to_date || "";
@@ -676,47 +723,76 @@
           entry_cutoff: cfg.entry_cutoff || "18:00",
           session_end: cfg.session_end || "19:30",
           entry_buffer_pct: cfg.entry_buffer_pct ?? 0.25,
-          stop_points: cfg.stop_points ?? 500,
+          stop_points: cfg.stop_points ?? 400,
           first_trail_profit: cfg.first_trail_profit ?? 400,
-          first_trail_lock_loss: cfg.first_trail_lock_loss ?? 200,
+          first_trail_lock_loss: cfg.first_trail_lock_loss ?? 300,
           second_trail_profit: cfg.second_trail_profit ?? 700,
         };
         Object.entries(values).forEach(([name, value]) => {
           const input = document.querySelector(`[name="${name}"]`);
           if (input) input.value = value;
         });
+        updateSetupFieldWidths();
+      }
+
+      function setupFieldText(control) {
+        if (control.tagName === "SELECT") {
+          return control.selectedOptions[0]?.textContent || control.value || "";
+        }
+        return control.value || control.placeholder || "";
+      }
+
+      function resizeSetupField(control) {
+        const textLength = setupFieldText(control).trim().length;
+        const label = control.closest("label");
+        const labelLength = label?.querySelector(".setup-label")?.textContent.replace("?", "").trim().length || 0;
+        const minChars = control.tagName === "SELECT" ? 2 : control.type === "number" ? 4 : control.type === "time" ? 6 : control.type === "date" ? 10 : 8;
+        const maxChars = control.tagName === "SELECT" ? 34 : 28;
+        const widthChars = Math.max(minChars, Math.min(maxChars, Math.max(textLength + 1, labelLength + 2)));
+        const target = label || control;
+        target.style.setProperty("--field-ch", widthChars);
+      }
+
+      function updateSetupFieldWidths() {
+        document.querySelectorAll("#backtestForm input:not([type='hidden']), #backtestForm select").forEach(resizeSetupField);
       }
 
       async function loadDefaults() {
         const defaults = await apiJson("/api/defaults").catch(() => null);
         sourceTimeframes = defaults?.source_timeframes || sourceTimeframes;
         const sources = defaults?.sources || [
-          { value: "MT5", label: "MetaTrader 5 (Local)" },
           { value: "DELTA", label: "Delta Exchange India (Online Cache)" },
+          { value: "MT5", label: "MetaTrader 5 (Local)" },
         ];
         document.getElementById("dataSourceInput").innerHTML =
           sources.map((item) => `<option value="${item.value}">${item.label}</option>`).join("");
         if (defaults) {
           document.getElementById("fromDateInput").value = defaults.from_date;
           document.getElementById("toDateInput").value = defaults.to_date;
-          document.getElementById("dataSourceInput").value = defaults.defaults.data_source || "MT5";
-          document.getElementById("symbolInput").value = defaults.defaults.symbol || "BTCUSD";
-          document.getElementById("strategyNameInput").value = `${defaults.defaults.symbol || "BTCUSD"} ${defaults.defaults.timeframe || "M5"} breakout`;
-          updateTimeframeOptions(defaults.defaults.timeframe, defaults.defaults.trail_timeframe || defaults.defaults.timeframe);
-          document.getElementById("entryPatternInput").value = defaults.defaults.entry_pattern || "BOTH";
+          const cfg = defaults.defaults || {};
+          document.getElementById("dataSourceInput").value = cfg.data_source || "DELTA";
+          document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD";
+          updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M15");
+          document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
+          Object.entries(cfg).forEach(([name, value]) => {
+            const input = document.querySelector(`#backtestForm [name="${name}"]`);
+            if (input) input.value = value;
+          });
         } else {
           updateTimeframeOptions("M5", "M15");
         }
         fillOptimizerTimeframes();
+        updateSetupFieldWidths();
       }
 
       function updateTimeframeOptions(entryValue, trailValue) {
-        const source = document.getElementById("dataSourceInput").value || "MT5";
+        const source = document.getElementById("dataSourceInput").value || "DELTA";
         const timeframes = sourceTimeframes[source] || sourceTimeframes.MT5;
         document.getElementById("timeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
         document.getElementById("trailTimeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
         document.getElementById("timeframeInput").value = timeframes.includes(entryValue) ? entryValue : "M5";
         document.getElementById("trailTimeframeInput").value = timeframes.includes(trailValue) ? trailValue : "M15";
+        updateSetupFieldWidths();
       }
 
       function renderValuePicker(containerId, inputId, options, selectedValues, settings = {}) {
@@ -789,7 +865,7 @@
       }
 
       function fillOptimizerTimeframes() {
-        const source = document.getElementById("dataSourceInput").value || "MT5";
+          const source = document.getElementById("dataSourceInput").value || "DELTA";
         const timeframes = sourceTimeframes[source] || sourceTimeframes.MT5;
         const scanDefaults = ["M5", "M10", "M15", "M30", "H1"];
         const entryDefaults = scanDefaults.filter((item) => timeframes.includes(item));
@@ -825,12 +901,12 @@
 
       async function loadSymbols() {
         try {
-          const source = document.getElementById("dataSourceInput").value || "MT5";
+          const source = document.getElementById("dataSourceInput").value || "DELTA";
           const symbols = await apiJson(`/api/symbols?${new URLSearchParams({ source }).toString()}`);
           if (Array.isArray(symbols)) {
             availableSymbols = symbols;
             if (!document.getElementById("symbolInput").value) {
-              const preferred = "BTCUSD";
+              const preferred = source === "DELTA" ? "BTCUSD" : "BTCUSD#";
               document.getElementById("symbolInput").value = symbols.includes(preferred) ? preferred : symbols[0] || "";
             }
             renderSymbolMenu();
@@ -838,17 +914,18 @@
         } catch {
           if (!document.getElementById("symbolInput").value) {
             document.getElementById("symbolInput").value =
-              "BTCUSD";
+              document.getElementById("dataSourceInput").value === "DELTA" ? "BTCUSD" : "BTCUSD#";
           }
         }
       }
 
       async function loadHistoryInfo() {
         const requestId = ++historyRequestId;
-        const source = document.getElementById("dataSourceInput").value || "MT5";
-        const symbol = document.getElementById("symbolInput").value || "BTCUSD";
+        const source = document.getElementById("dataSourceInput").value || "DELTA";
+        const symbol = document.getElementById("symbolInput").value || (source === "DELTA" ? "BTCUSD" : "BTCUSD#");
         const entryTimeframe = document.getElementById("timeframeInput").value || "M5";
         const trailTimeframe = document.getElementById("trailTimeframeInput").value || entryTimeframe;
+        const secondTarget = document.querySelector('[name="second_trail_profit"]').value || "700";
         const fromDate = document.getElementById("fromDateInput").value;
         const toDate = document.getElementById("toDateInput").value;
         const el = document.getElementById("historyInfo");
@@ -870,12 +947,12 @@
             el.querySelector("span:last-child").textContent =
               `Delta ${symbol}: requested ${entryResult.from_date} to ${entryResult.to_date}`;
             document.getElementById("dataNoteText").textContent =
-              `Delta online candles are downloaded in chunks on Run Backtest and stored locally for faster reruns. Entry uses ${entryTimeframe}; +700 exit trail uses ${trailTimeframe}.`;
+              `Delta online candles are downloaded in chunks on Run Backtest and stored locally for faster reruns. Entry uses ${entryTimeframe}; +${secondTarget} exit trail uses ${trailTimeframe}.`;
           } else {
             el.querySelector("span:last-child").textContent =
               `Entry ${entryTimeframe}: ${entryResult.from_date} to ${entryResult.to_date} | Trail ${trailTimeframe}: ${trailResult.from_date} to ${trailResult.to_date}`;
             document.getElementById("dataNoteText").textContent =
-              `Local MT5 data: entry candles use ${entryTimeframe}; after +700 points, previous 2 completed ${trailTimeframe} candles set the trail exit.`;
+              `Local MT5 data: entry candles use ${entryTimeframe}; after +${secondTarget} points, current and previous ${trailTimeframe} candles set the trail exit.`;
           }
         } catch (error) {
           if (requestId !== historyRequestId) return;
@@ -902,6 +979,167 @@
       function collectForm() {
         const form = new FormData(document.getElementById("backtestForm"));
         return Object.fromEntries(form.entries());
+      }
+
+      function savedStrategies() {
+        try {
+          const data = JSON.parse(localStorage.getItem(STRATEGY_STORAGE_KEY) || "[]");
+          return Array.isArray(data) ? data : [];
+        } catch {
+          return [];
+        }
+      }
+
+      function strategyLabel(values) {
+        return (values.strategy_name || `${values.symbol || "Strategy"} ${values.timeframe || ""}`).trim();
+      }
+
+      function suggestedStrategyName(values = collectForm()) {
+        const symbol = values.symbol?.trim() || "Strategy";
+        const timeframe = values.timeframe || "M5";
+        const pattern = values.entry_pattern === "BUY_ONLY" ? "buy" : values.entry_pattern === "SELL_ONLY" ? "sell" : "breakout";
+        return `${symbol} ${timeframe} ${pattern}`.trim();
+      }
+
+      function renderSavedStrategies(selectedId = activeSavedStrategyId, query = null) {
+        const list = document.getElementById("savedStrategiesList");
+        const search = document.getElementById("savedStrategySearch");
+        const strategies = savedStrategies();
+        if (selectedId) activeSavedStrategyId = selectedId;
+        const selectedStrategy = findSavedStrategy(activeSavedStrategyId);
+        if (selectedStrategy && query === null) {
+          search.value = strategyLabel(selectedStrategy.values);
+        }
+        const searchText = (query ?? "").trim().toLowerCase();
+        const matches = strategies.filter((item) => !searchText || strategyLabel(item.values).toLowerCase().includes(searchText));
+        list.innerHTML = matches.length
+          ? matches.map((item) => `
+              <div class="saved-strategy-row${item.id === selectedId ? " active" : ""}">
+                <button class="saved-strategy-load" type="button" data-strategy-id="${escapeHtml(item.id)}">
+                  ${escapeHtml(strategyLabel(item.values))}
+                </button>
+                <button class="saved-strategy-delete danger-btn" type="button" data-strategy-id="${escapeHtml(item.id)}" aria-label="Delete ${escapeHtml(strategyLabel(item.values))}">
+                  <i data-lucide="trash-2"></i>
+                  Delete
+                </button>
+              </div>
+            `).join("")
+          : `<div class="saved-strategy-empty">${strategies.length ? "No matching strategy" : "No saved strategies"}</div>`;
+        if (window.lucide) lucide.createIcons();
+        updateSetupFieldWidths();
+      }
+
+      function openSavedStrategyMenu(query = "") {
+        renderSavedStrategies(activeSavedStrategyId, query);
+        document.getElementById("savedStrategiesList").classList.add("open");
+      }
+
+      function closeSavedStrategyMenu() {
+        document.getElementById("savedStrategiesList").classList.remove("open");
+        const selectedStrategy = findSavedStrategy(activeSavedStrategyId);
+        if (selectedStrategy) {
+          document.getElementById("savedStrategySearch").value = strategyLabel(selectedStrategy.values);
+        }
+      }
+
+      function findSavedStrategy(strategyId) {
+        return savedStrategies().find((item) => item.id === strategyId) || null;
+      }
+
+      function applyStrategyValues(values) {
+        if (!values) return;
+        document.getElementById("dataSourceInput").value = values.data_source || "DELTA";
+        updateTimeframeOptions(values.timeframe || "M5", values.trail_timeframe || values.timeframe || "M15");
+        fillOptimizerTimeframes();
+        Object.entries(values).forEach(([name, value]) => {
+          const input = document.querySelector(`#backtestForm [name="${name}"]`);
+          if (input) input.value = value;
+        });
+        loadSymbols();
+        loadHistoryInfo();
+        loadLatestOptimizer();
+        updateSetupFieldWidths();
+      }
+
+      function openSaveStrategyModal() {
+        const values = collectForm();
+        if (!values.symbol?.trim()) {
+          setStatus("Symbol is required before saving strategy.", "error");
+          return;
+        }
+        const input = document.getElementById("strategySaveNameInput");
+        input.value = values.strategy_name || suggestedStrategyName(values);
+        document.getElementById("saveStrategyModal").hidden = false;
+        requestAnimationFrame(() => {
+          input.focus();
+          input.select();
+        });
+      }
+
+      function closeSaveStrategyModal() {
+        document.getElementById("saveStrategyModal").hidden = true;
+      }
+
+      function openDeleteStrategyModal(strategyId) {
+        const strategy = findSavedStrategy(strategyId);
+        if (!strategy) {
+          setStatus("Saved strategy not found.", "error");
+          return;
+        }
+        pendingDeleteStrategyId = strategyId;
+        document.getElementById("deleteStrategyText").textContent =
+          `Delete "${strategyLabel(strategy.values)}"? This saved setup will be removed from your browser.`;
+        document.getElementById("deleteStrategyModal").hidden = false;
+      }
+
+      function closeDeleteStrategyModal() {
+        document.getElementById("deleteStrategyModal").hidden = true;
+        pendingDeleteStrategyId = "";
+      }
+
+      function deleteSelectedStrategy() {
+        const strategy = findSavedStrategy(pendingDeleteStrategyId);
+        if (!pendingDeleteStrategyId || !strategy) {
+          closeDeleteStrategyModal();
+          setStatus("Saved strategy not found.", "error");
+          return;
+        }
+        const strategies = savedStrategies().filter((item) => item.id !== pendingDeleteStrategyId);
+        localStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify(strategies));
+        if (activeSavedStrategyId === pendingDeleteStrategyId) {
+          activeSavedStrategyId = "";
+          document.getElementById("savedStrategySearch").value = "";
+        }
+        renderSavedStrategies();
+        closeDeleteStrategyModal();
+        setStatus(`Deleted ${strategyLabel(strategy.values)}`, "ready");
+      }
+
+      function saveCurrentStrategy() {
+        const values = collectForm();
+        if (!values.symbol?.trim()) {
+          setStatus("Symbol is required before saving strategy.", "error");
+          return;
+        }
+        const modalName = document.getElementById("strategySaveNameInput").value.trim();
+        if (!modalName) {
+          setStatus("Strategy name is required.", "error");
+          document.getElementById("strategySaveNameInput").focus();
+          return;
+        }
+        values.strategy_name = modalName;
+        const name = strategyLabel(values);
+        const strategies = savedStrategies().filter((item) => strategyLabel(item.values).toLowerCase() !== name.toLowerCase());
+        const record = {
+          id: `${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          saved_at: new Date().toISOString(),
+          values,
+        };
+        strategies.unshift(record);
+        localStorage.setItem(STRATEGY_STORAGE_KEY, JSON.stringify(strategies.slice(0, 30)));
+        renderSavedStrategies(record.id);
+        closeSaveStrategyModal();
+        setStatus("Strategy saved", "ready");
       }
 
       async function runBacktest() {
@@ -936,42 +1174,6 @@
           btn.disabled = false;
           clearButton.disabled = false;
         }
-      }
-
-      async function saveStrategy(options = {}) {
-        const button = options.buttonId
-          ? document.getElementById(options.buttonId)
-          : document.getElementById("switchAlgoBtn");
-        const values = collectForm();
-        if (values.entry_cutoff < values.session_start || values.entry_cutoff > values.session_end) {
-          setStatus("Last Entry Time must be between Session Start and Force Exit Time.", "error");
-          return;
-        }
-        button.disabled = true;
-        setStatus("Saving strategy...", "loading");
-        try {
-          await apiJson("/api/algo/strategies", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              ...values,
-              name: values.strategy_name?.trim() || `${values.symbol || "Strategy"} ${values.timeframe || "M5"}`,
-            }),
-          });
-          if (options.openAlgo) {
-            window.location.href = "/algo";
-          } else {
-            setStatus("Strategy saved", "ready");
-          }
-        } catch (error) {
-          setStatus(error.message, "error");
-        } finally {
-          button.disabled = false;
-        }
-      }
-
-      async function saveStrategyAndOpenAlgo() {
-        await saveStrategy({ openAlgo: true });
       }
 
       async function clearAllData() {
@@ -1035,7 +1237,7 @@
       }
 
       function optimizerSettingsText(row) {
-        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${fmt(row.stop_points)} | Trail ${fmt(row.first_trail_profit)}/${fmt(row.first_trail_lock_loss)} | Second ${fmt(row.second_trail_profit)}`;
+        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${fmt(row.stop_points)} | Trail ${fmt(row.first_trail_profit)}/${fmt(row.first_trail_lock_loss)} | 2nd ${fmt(row.second_trail_profit || 700)}`;
       }
 
       function optimizerAveragePoints(row) {
@@ -1115,7 +1317,7 @@
           : `${count} tested settings available.`;
         const exportButton = document.getElementById("optimizerExportBtn");
         exportButton.hidden = !count;
-        exportButton.dataset.source = document.getElementById("dataSourceInput").value || "MT5";
+        exportButton.dataset.source = document.getElementById("dataSourceInput").value || "DELTA";
         exportButton.dataset.symbol = job.scan_config?.symbol || document.getElementById("symbolInput").value || "";
         exportButton.dataset.scanId = job.scan_id || "";
         const scanSelect = document.getElementById("optimizerScanSelect");
@@ -1134,7 +1336,7 @@
 
       function optimizerScope() {
         return {
-          source: document.getElementById("dataSourceInput").value || "MT5",
+          source: document.getElementById("dataSourceInput").value || "DELTA",
           symbol: document.getElementById("symbolInput").value.trim(),
         };
       }
@@ -1291,25 +1493,26 @@
 
       function renderHeader() {
         if (!report) return;
+        const secondTarget = report.config.second_trail_profit || 700;
         document.getElementById("sideSymbol").textContent = report.config.symbol;
-        document.getElementById("sideMeta").textContent = `${report.config.data_source || "MT5"} | Entry ${report.config.timeframe} | +700 Trail ${report.config.trail_timeframe || report.config.timeframe} | ${report.config.range} | ${report.config.session}`;
+        document.getElementById("sideMeta").textContent = `${report.config.data_source || "MT5"} | Entry ${report.config.timeframe} | +${fmt(secondTarget)} Trail ${report.config.trail_timeframe || report.config.timeframe} | ${report.config.range} | ${report.config.session}`;
         if (report.config.data_from_date && report.config.data_to_date) {
           document.getElementById("dataNoteText").textContent =
-            `${report.config.data_source === "DELTA" ? "Delta cached online" : "Local MT5"} data used: ${report.config.data_from_date} to ${report.config.data_to_date}. Entry ${report.config.timeframe}; +700 exit trail ${report.config.trail_timeframe || report.config.timeframe}.`;
+            `${report.config.data_source === "DELTA" ? "Delta cached online" : "Local MT5"} data used: ${report.config.data_from_date} to ${report.config.data_to_date}. Entry ${report.config.timeframe}; +${fmt(secondTarget)} exit trail ${report.config.trail_timeframe || report.config.timeframe}.`;
         }
       }
 
       function resetPointsRange() {
-        const config = report?.config || {};
-        const trades = report?.trades || [];
-        pointsRange = {
-          preset: "custom",
-          from: config.from_date || trades[0]?.trade_date || null,
-          to: config.to_date || trades[trades.length - 1]?.trade_date || null,
-        };
-        document.getElementById("pointsPresetInput").value = "custom";
-        document.getElementById("pointsFromInput").value = pointsRange.from || "";
-        document.getElementById("pointsToInput").value = pointsRange.to || "";
+        const cfg = report?.config || {};
+        if (cfg.from_date && cfg.to_date) {
+          pointsRange = { preset: "custom", from: cfg.from_date, to: cfg.to_date };
+          document.getElementById("pointsPresetInput").value = "custom";
+          document.getElementById("pointsFromInput").value = cfg.from_date;
+          document.getElementById("pointsToInput").value = cfg.to_date;
+          return;
+        }
+        pointsRange = { preset: "30", from: null, to: null };
+        document.getElementById("pointsPresetInput").value = "30";
       }
 
       function renderMetrics() {
@@ -1424,6 +1627,38 @@
         });
       }
 
+      function slCell(value, activatedAt) {
+        if (value === null || value === undefined || value === "") return "-";
+        const time = activatedAt ? `<small>${timeOnly(activatedAt)}</small>` : "";
+        return `${fmt(value)}${time}`;
+      }
+
+      function derivedFirstTrailSl(trade) {
+        if (trade.first_trail_sl !== null && trade.first_trail_sl !== undefined && trade.first_trail_sl !== "") return trade.first_trail_sl;
+        const firstTarget = Number(report?.config?.first_trail_profit || 0);
+        const firstLock = Number(report?.config?.first_trail_lock_loss || 0);
+        const mfe = Number(trade.mfe_points || 0);
+        const entry = Number(trade.entry_price);
+        if (!Number.isFinite(entry) || !firstLock) return null;
+        const reachedFirstTrail = trade.exit_reason === "FIRST_TRAIL_SL" || trade.exit_reason === "TWO_CANDLE_TRAIL_SL" || (firstTarget && mfe >= firstTarget);
+        if (!reachedFirstTrail) return null;
+        return trade.side === "BUY" ? entry + firstLock : entry - firstLock;
+      }
+
+      function derivedFirstTrailTime(trade) {
+        return trade.first_trail_time || null;
+      }
+
+      function derivedTwoCandleTrailSl(trade) {
+        if (trade.two_candle_trail_sl !== null && trade.two_candle_trail_sl !== undefined && trade.two_candle_trail_sl !== "") return trade.two_candle_trail_sl;
+        if (trade.exit_reason === "TWO_CANDLE_TRAIL_SL") return trade.exit_price;
+        return null;
+      }
+
+      function derivedTwoCandleTrailTime(trade) {
+        return trade.two_candle_trail_time || null;
+      }
+
       function updateSortHeaders() {
         document.querySelectorAll(".sort-btn").forEach((button) => {
           const isActive = button.dataset.sort === sortState.key;
@@ -1449,6 +1684,9 @@
                 <td class="num">${fmt(trade.range_high)}</td>
                 <td class="num">${fmt(trade.range_low)}</td>
                 <td class="num">${fmt(trade.entry_price)}</td>
+                <td class="num">${slCell(trade.initial_sl, trade.entry_time)}</td>
+                <td class="num">${slCell(derivedFirstTrailSl(trade), derivedFirstTrailTime(trade))}</td>
+                <td class="num">${slCell(derivedTwoCandleTrailSl(trade), derivedTwoCandleTrailTime(trade))}</td>
                 <td class="num">${fmt(trade.exit_price)}</td>
                 <td><span class="reason">${exitLabel(trade.exit_reason)}</span></td>
                 <td class="num ${tone(trade.pnl_points)}"><b>${fmt(trade.pnl_points)}</b></td>
@@ -1456,7 +1694,7 @@
                 <td class="num">${fmt(trade.mae_points)}</td>
               </tr>
             `).join("")
-          : `<tr><td class="empty" colspan="10">Run backtest to load records.</td></tr>`;
+          : `<tr><td class="empty" colspan="13">Run backtest to load records.</td></tr>`;
       }
 
       function renderAll() {
@@ -1716,14 +1954,19 @@
           overlay.classList.remove("hidden");
         });
         const entryTimeframe = report.config.timeframe;
-        const exitTimeframe = report.config.trail_timeframe || report.config.timeframe;
+        const trailTimeframe = report.config.trail_timeframe || report.config.timeframe;
+        const exitTimeframe = exitChartMode === "M1" ? "M1" : trailTimeframe;
         document.getElementById("entryChartTimeframe").textContent = entryTimeframe;
         document.getElementById("exitChartTimeframe").textContent = exitTimeframe;
+        document.getElementById("exitTrailTfBtn").textContent = trailTimeframe;
+        document.querySelectorAll(".exit-chart-tf").forEach((button) => {
+          button.classList.toggle("active", button.dataset.exitChartMode === exitChartMode);
+        });
         const rangeText = chartMode === "window"
           ? ` | Window ${currentChartWindow().from} to ${currentChartWindow().to} | ${tradesForCurrentChart().length} trades`
           : "";
         document.getElementById("chartMeta").textContent =
-          `${selectedTrade.trade_date} | Entry ${entryTimeframe} / Exit Trail ${exitTimeframe} | ${selectedTrade.side} | Entry ${fmt(selectedTrade.entry_price)} | Exit ${fmt(selectedTrade.exit_price)}${rangeText}`;
+          `${selectedTrade.trade_date} | Entry ${entryTimeframe} / Exit Chart ${exitTimeframe} | ${selectedTrade.side} | Entry ${fmt(selectedTrade.entry_price)} | Exit ${fmt(selectedTrade.exit_price)}${rangeText}`;
 
         async function fetchChartCandles(timeframe) {
           const params = new URLSearchParams({
@@ -1765,6 +2008,7 @@
           try {
             const candles = await fetchChartCandles(chartRequest.timeframe);
             if (requestId !== chartRequestId) return;
+            chartRequest.verifiedMarkers = verifiedMarkersForChart(chartRequest, candles);
             renderHighcharts(chartRequest, candles);
             chartRequest.overlay.classList.add("hidden");
           } catch (error) {
@@ -1783,12 +2027,20 @@
           Number(item.low),
           Number(item.close),
         ]);
-        const entryTime = tradeMarkerTime(selectedTrade.entry_time);
-        const exitTime = tradeMarkerTime(selectedTrade.exit_time);
+        const selectedMarkers = chartRequest.verifiedMarkers?.get(selectedTrade) || {};
+        const entryTime = Object.prototype.hasOwnProperty.call(selectedMarkers, "entryTime")
+          ? selectedMarkers.entryTime
+          : tradeMarkerTime(selectedTrade.entry_time);
+        const exitTime = Object.prototype.hasOwnProperty.call(selectedMarkers, "exitTime")
+          ? selectedMarkers.exitTime
+          : tradeMarkerTime(selectedTrade.exit_time);
         const rangeStartTime = istDateTimeMs(selectedTrade.trade_date, report.config.range_start || "08:30");
         const rangeEndTime = istDateTimeMs(selectedTrade.trade_date, report.config.range_end || "09:30");
         const entryColor = selectedTrade.side === "BUY" ? "#059669" : "#e11d48";
         const visibleTrades = tradesForCurrentChart();
+        const exitPlotLines = Number.isFinite(exitTime)
+          ? [{ value: exitTime, color: "#7c3aed", width: 1, dashStyle: "Dash", label: { text: "Exit", rotation: 0, y: 30, style: { color: "#7c3aed", fontWeight: "700" } } }]
+          : [];
 
         const existingChart = chartRequest.kind === "entry" ? entryCandleChart : exitCandleChart;
         if (existingChart) {
@@ -1826,7 +2078,7 @@
             ],
             plotLines: [
               { value: entryTime, color: entryColor, width: 1, dashStyle: "Dash", label: { text: "Entry", rotation: 0, y: 14, style: { color: entryColor, fontWeight: "700" } } },
-              { value: exitTime, color: "#7c3aed", width: 1, dashStyle: "Dash", label: { text: "Exit", rotation: 0, y: 30, style: { color: "#7c3aed", fontWeight: "700" } } },
+              ...exitPlotLines,
             ],
           },
           yAxis: {
@@ -1889,7 +2141,7 @@
               onSeries: "ohlc",
               shape: "flag",
               width: 56,
-              data: tradeFlags(visibleTrades),
+              data: tradeFlags(visibleTrades, chartRequest.verifiedMarkers),
             },
           ],
         });
@@ -1903,7 +2155,7 @@
           : rangeStartTime - 60 * 60 * 1000;
         const focusEnd = chartMode === "window"
           ? istDateTimeMs(currentChartWindow().to, report.config.session_end || "19:30") + 60 * 60 * 1000
-          : exitTime + 60 * 60 * 1000;
+          : (Number.isFinite(exitTime) ? exitTime : entryTime) + 60 * 60 * 1000;
         const dataMin = chart.xAxis[0].dataMin;
         const dataMax = chart.xAxis[0].dataMax;
         if (Number.isFinite(dataMin) && Number.isFinite(dataMax)) {
@@ -1916,6 +2168,51 @@
         }
       }
 
+      function verifiedMarkersForChart(chartRequest, candles) {
+        if (chartRequest.kind !== "exit" || chartRequest.timeframe !== "M1") return null;
+        const markers = new Map();
+        tradesForCurrentChart().forEach((trade) => {
+          const entryTime = verifiedEntryTime(trade, candles);
+          const exitTime = entryTime == null ? null : verifiedExitTime(trade, candles, entryTime);
+          markers.set(trade, { entryTime, exitTime });
+        });
+        return markers;
+      }
+
+      function verifiedEntryTime(trade, candles) {
+        const recordedEntry = tradeMarkerTime(trade.entry_time);
+        const entryPrice = Number(trade.entry_price);
+        const isBuy = trade.side === "BUY";
+        const candle = candles.find((item) => {
+          const time = Number(item.time) * 1000;
+          if (time < recordedEntry) return false;
+          return isBuy ? Number(item.high) >= entryPrice : Number(item.low) <= entryPrice;
+        });
+        return candle ? Number(candle.time) * 1000 : recordedEntry;
+      }
+
+      function verifiedExitTime(trade, candles, entryTime) {
+        const exitPrice = Number(trade.exit_price);
+        const recordedExit = tradeMarkerTime(trade.exit_time);
+        const isBuy = trade.side === "BUY";
+        const exitReason = String(trade.exit_reason || "");
+        const isStopExit = exitReason.includes("SL");
+        let activeFrom = entryTime;
+        if (exitReason === "FIRST_TRAIL_SL" && trade.first_trail_time) {
+          activeFrom = tradeMarkerTime(trade.first_trail_time);
+        } else if (exitReason === "TWO_CANDLE_TRAIL_SL" && trade.two_candle_trail_time) {
+          activeFrom = tradeMarkerTime(trade.two_candle_trail_time);
+        }
+        const candle = candles.find((item) => {
+          const time = Number(item.time) * 1000;
+          if (time < activeFrom) return false;
+          if (!isStopExit && time < recordedExit) return false;
+          if (isStopExit) return isBuy ? Number(item.low) <= exitPrice : Number(item.high) >= exitPrice;
+          return time >= recordedExit;
+        });
+        return candle ? Number(candle.time) * 1000 : null;
+      }
+
       function tradesForCurrentChart() {
         const trades = report?.trades || [];
         if (chartMode !== "window") return [selectedTrade];
@@ -1923,16 +2220,17 @@
         return trades.filter((trade) => trade.trade_date >= range.from && trade.trade_date <= range.to);
       }
 
-      function tradeFlags(trades) {
+      function tradeFlags(trades, verifiedMarkers = null) {
         const showEntry = document.getElementById("showEntryFlagInput").checked;
         const showExit = document.getElementById("showExitFlagInput").checked;
         return trades.flatMap((trade) => {
           const isSelected = trade === selectedTrade;
           const entryColor = trade.side === "BUY" ? "#059669" : "#e11d48";
+          const markers = verifiedMarkers?.get(trade) || {};
           const flags = [];
           if (showEntry) {
             flags.push({
-              x: tradeMarkerTime(trade.entry_time),
+              x: markers.entryTime ?? tradeMarkerTime(trade.entry_time),
               title: isSelected ? trade.side : trade.side[0],
               text: `${trade.trade_date} ${trade.side} Entry ${fmt(trade.entry_price)}`,
               color: entryColor,
@@ -1940,9 +2238,9 @@
               style: { color: isSelected ? "#ffffff" : entryColor, fontWeight: "700" },
             });
           }
-          if (showExit) {
+          if (showExit && (markers.exitTime !== null)) {
             flags.push({
-              x: tradeMarkerTime(trade.exit_time),
+              x: markers.exitTime ?? tradeMarkerTime(trade.exit_time),
               title: isSelected ? "EXIT" : "X",
               text: `${trade.trade_date} Exit ${fmt(trade.exit_price)} | P&L ${fmt(trade.pnl_points)}`,
               color: "#7c3aed",
@@ -1981,10 +2279,89 @@
         };
       }
 
+      function setSidebarActive(id) {
+        const links = Array.from(document.querySelectorAll(".side-nav a[href^='#']"));
+        const targetId = id || "setup";
+        links.forEach((link) => {
+          link.classList.toggle("active", link.getAttribute("href") === `#${targetId}`);
+        });
+      }
+
+      function updateSidebarActive() {
+        setSidebarActive(window.location.hash.slice(1) || "setup");
+      }
+
       document.getElementById("runBtn").addEventListener("click", runBacktest);
-      document.getElementById("saveSetupStrategyBtn").addEventListener("click", () => saveStrategy({ buttonId: "saveSetupStrategyBtn" }));
-      document.getElementById("switchAlgoBtn").addEventListener("click", saveStrategyAndOpenAlgo);
+      document.getElementById("saveStrategyBtn").addEventListener("click", openSaveStrategyModal);
+      document.getElementById("confirmSaveStrategyBtn").addEventListener("click", saveCurrentStrategy);
+      document.getElementById("cancelSaveStrategyBtn").addEventListener("click", closeSaveStrategyModal);
+      document.getElementById("closeSaveStrategyModalBtn").addEventListener("click", closeSaveStrategyModal);
+      document.getElementById("confirmDeleteStrategyBtn").addEventListener("click", deleteSelectedStrategy);
+      document.getElementById("cancelDeleteStrategyBtn").addEventListener("click", closeDeleteStrategyModal);
+      document.getElementById("closeDeleteStrategyModalBtn").addEventListener("click", closeDeleteStrategyModal);
+      document.getElementById("strategySaveNameInput").addEventListener("keydown", (event) => {
+        if (event.key === "Enter") saveCurrentStrategy();
+        if (event.key === "Escape") closeSaveStrategyModal();
+      });
+      document.getElementById("saveStrategyModal").addEventListener("click", (event) => {
+        if (event.target.id === "saveStrategyModal") closeSaveStrategyModal();
+      });
+      document.getElementById("deleteStrategyModal").addEventListener("click", (event) => {
+        if (event.target.id === "deleteStrategyModal") closeDeleteStrategyModal();
+      });
+      document.addEventListener("keydown", (event) => {
+        if (event.key === "Escape" && !document.getElementById("saveStrategyModal").hidden) {
+          closeSaveStrategyModal();
+        }
+        if (event.key === "Escape" && !document.getElementById("deleteStrategyModal").hidden) {
+          closeDeleteStrategyModal();
+        }
+        if (event.key === "Escape") {
+          closeSavedStrategyMenu();
+        }
+      });
+      document.getElementById("savedStrategySearch").addEventListener("focus", () => {
+        document.getElementById("savedStrategySearch").select();
+        openSavedStrategyMenu("");
+      });
+      document.getElementById("savedStrategySearch").addEventListener("input", (event) => {
+        openSavedStrategyMenu(event.target.value);
+      });
+      document.getElementById("savedStrategiesList").addEventListener("click", (event) => {
+        const deleteButton = event.target.closest(".saved-strategy-delete");
+        if (deleteButton) {
+          closeSavedStrategyMenu();
+          openDeleteStrategyModal(deleteButton.dataset.strategyId);
+          return;
+        }
+        const loadButton = event.target.closest(".saved-strategy-load");
+        if (!loadButton) return;
+        const strategy = findSavedStrategy(loadButton.dataset.strategyId);
+        if (strategy) {
+          applyStrategyValues(strategy.values);
+          activeSavedStrategyId = strategy.id;
+          document.getElementById("savedStrategySearch").value = strategyLabel(strategy.values);
+          renderSavedStrategies(strategy.id);
+          closeSavedStrategyMenu();
+          setStatus("Saved strategy loaded", "ready");
+        }
+      });
+      document.addEventListener("click", (event) => {
+        if (!event.target.closest(".saved-strategy-combo")) {
+          closeSavedStrategyMenu();
+        }
+      });
+      document.getElementById("backtestForm").addEventListener("input", (event) => {
+        if (event.target.matches("input, select")) resizeSetupField(event.target);
+      });
+      document.getElementById("backtestForm").addEventListener("change", (event) => {
+        if (event.target.matches("input, select")) resizeSetupField(event.target);
+      });
       document.getElementById("clearAllDataBtn").addEventListener("click", clearAllData);
+      document.querySelectorAll(".side-nav a[href^='#']").forEach((link) => {
+        link.addEventListener("click", () => setSidebarActive(link.getAttribute("href").slice(1)));
+      });
+      window.addEventListener("hashchange", () => setSidebarActive(window.location.hash.slice(1)));
       initInfoButtons();
       [
         ["optimizerRangeStartAddBtn", "optimizerRangeStartAddInput", "optimizerRangeStartPicker", "optimizerRangeStarts"],
@@ -2077,6 +2454,7 @@
         const button = event.target.closest("button[data-symbol]");
         if (!button) return;
         document.getElementById("symbolInput").value = button.dataset.symbol;
+        resizeSetupField(document.getElementById("symbolInput"));
         document.getElementById("symbolMenu").classList.remove("open");
         loadHistoryInfo();
       });
@@ -2119,6 +2497,13 @@
       });
       document.getElementById("showEntryFlagInput").addEventListener("change", loadChartForSelectedTrade);
       document.getElementById("showExitFlagInput").addEventListener("change", loadChartForSelectedTrade);
+      document.querySelectorAll(".exit-chart-tf").forEach((button) => {
+        button.addEventListener("click", () => {
+          exitChartMode = button.dataset.exitChartMode;
+          document.querySelectorAll(".exit-chart-tf").forEach((item) => item.classList.toggle("active", item === button));
+          loadChartForSelectedTrade();
+        });
+      });
       document.querySelectorAll(".points-mode").forEach((button) => {
         button.addEventListener("click", () => {
           pointsMode = button.dataset.pointsMode;
@@ -2135,6 +2520,7 @@
       });
       document.getElementById("timeframeInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("trailTimeframeInput").addEventListener("change", loadHistoryInfo);
+      document.querySelector('[name="second_trail_profit"]').addEventListener("change", loadHistoryInfo);
       document.getElementById("fromDateInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("toDateInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("symbolInput").addEventListener("change", loadHistoryInfo);
@@ -2193,38 +2579,6 @@
         if (entryCandleChart) entryCandleChart.reflow();
         if (exitCandleChart) exitCandleChart.reflow();
       });
-      function zoomCandleCharts(factor) {
-        [entryCandleChart, exitCandleChart].forEach((chart) => {
-          if (!chart) return;
-          const axis = chart.xAxis[0];
-          const extremes = axis.getExtremes();
-          const dataMin = extremes.dataMin;
-          const dataMax = extremes.dataMax;
-          if (!Number.isFinite(dataMin) || !Number.isFinite(dataMax) || dataMax <= dataMin) return;
-          const currentMin = Number.isFinite(extremes.min) ? extremes.min : dataMin;
-          const currentMax = Number.isFinite(extremes.max) ? extremes.max : dataMax;
-          const midpoint = (currentMin + currentMax) / 2;
-          const fullSpan = dataMax - dataMin;
-          const nextSpan = Math.min(fullSpan, Math.max(fullSpan / 80, (currentMax - currentMin) * factor));
-          let nextMin = midpoint - nextSpan / 2;
-          let nextMax = midpoint + nextSpan / 2;
-          if (nextMin < dataMin) {
-            nextMax += dataMin - nextMin;
-            nextMin = dataMin;
-          }
-          if (nextMax > dataMax) {
-            nextMin -= nextMax - dataMax;
-            nextMax = dataMax;
-          }
-          axis.setExtremes(Math.max(dataMin, nextMin), Math.min(dataMax, nextMax), true, false);
-        });
-      }
-      document.getElementById("zoomOutChartBtn").addEventListener("click", () => zoomCandleCharts(1.5));
-      document.getElementById("zoomInChartBtn").addEventListener("click", () => zoomCandleCharts(0.67));
-      document.getElementById("fitChartBtn").addEventListener("click", () => {
-        if (entryCandleChart) entryCandleChart.xAxis[0].setExtremes(null, null);
-        if (exitCandleChart) exitCandleChart.xAxis[0].setExtremes(null, null);
-      });
       window.addEventListener("resize", () => {
         if (report) renderPointsChart();
       });
@@ -2243,6 +2597,7 @@
       async function boot() {
         await loadSession();
         await loadDefaults();
+        renderSavedStrategies();
         await loadSymbols();
         if (initialReport) {
           report = initialReport;
@@ -2260,9 +2615,9 @@
           if (window.lucide) lucide.createIcons();
         }
         await loadLatestOptimizer();
+        updateSidebarActive();
       }
 
-      applyPageMode();
       boot();
     </script>
   </body>

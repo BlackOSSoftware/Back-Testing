@@ -6,7 +6,7 @@ from datetime import time
 import numpy as np
 import pandas as pd
 
-from .backtest_mt5 import BacktestConfig, TIMEFRAME_MINUTES
+from .backtest_mt5 import BacktestConfig
 
 try:
     from numba import njit, prange
@@ -228,25 +228,24 @@ def build_scan_context(layout: EntryLayout, trail_df: pd.DataFrame, trail_timefr
     trailing_lows = np.full(count, np.nan, dtype=np.float64)
     trailing_highs = np.full(count, np.nan, dtype=np.float64)
     if count and not trail_df.empty:
-        duration_ns = TIMEFRAME_MINUTES[trail_timeframe.upper()] * 60 * 1_000_000_000
         cache_key = f"_optimizer_trail_source_{trail_timeframe.upper()}"
         cached = trail_df.attrs.get(cache_key)
         if cached is None:
             trail = trail_df.sort_values("time_ist")
             cached = {
-                "completed_times": trail["time_ist"].array.asi8.astype(np.int64) + duration_ns,
+                "start_times": trail["time_ist"].array.asi8.astype(np.int64),
                 "lows": trail["low"].to_numpy(dtype=np.float64),
                 "highs": trail["high"].to_numpy(dtype=np.float64),
             }
             trail_df.attrs[cache_key] = cached
-        completed_times = cached["completed_times"]
-        positions = np.searchsorted(completed_times, layout.times_ns, side="right")
-        eligible = positions >= 2
+        start_times = cached["start_times"]
+        positions = np.searchsorted(start_times, layout.times_ns, side="right") - 1
+        eligible = positions >= 1
         indices = positions[eligible]
         lows = cached["lows"]
         highs = cached["highs"]
-        trailing_lows[eligible] = np.minimum(lows[indices - 2], lows[indices - 1])
-        trailing_highs[eligible] = np.maximum(highs[indices - 2], highs[indices - 1])
+        trailing_lows[eligible] = np.minimum(lows[indices - 1], lows[indices])
+        trailing_highs[eligible] = np.maximum(highs[indices - 1], highs[indices])
     return ScanContext(layout=layout, trail_lows=trailing_lows, trail_highs=trailing_highs)
 
 
@@ -309,6 +308,7 @@ def _evaluate_kernel(
         entry_price = buy_trigger if side == 1 else sell_trigger
         stop = entry_price - stop_points if side == 1 else entry_price + stop_points
         exit_price = closes[end - 1]
+        second_trail_active = False
         for idx in range(entry_idx, end):
             if side == 1:
                 if lows[idx] <= stop:
@@ -319,6 +319,8 @@ def _evaluate_kernel(
                     if candidate > stop:
                         stop = candidate
                 if highs[idx] >= entry_price + second_trail_profit:
+                    second_trail_active = True
+                if second_trail_active:
                     candidate = trail_lows[idx]
                     if not np.isnan(candidate) and candidate > stop:
                         stop = candidate
@@ -331,6 +333,8 @@ def _evaluate_kernel(
                     if candidate < stop:
                         stop = candidate
                 if lows[idx] <= entry_price - second_trail_profit:
+                    second_trail_active = True
+                if second_trail_active:
                     candidate = trail_highs[idx]
                     if not np.isnan(candidate) and candidate < stop:
                         stop = candidate

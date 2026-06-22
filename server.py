@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from backtest_desk.server import app
+from backtest.server import app
 
 
 if __name__ == "__main__":

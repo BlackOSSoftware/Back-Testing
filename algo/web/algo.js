@@ -78,10 +78,10 @@ function fillStrategyForm(strategy) {
   const form = document.getElementById("strategyForm");
   const defaults = {
     name: "",
-    data_source: "MT5",
-    symbol: "BTCUSD#",
+    data_source: "DELTA",
+    symbol: "BTCUSD",
     timeframe: "M5",
-    trail_timeframe: "M5",
+    trail_timeframe: "M15",
     entry_pattern: "BOTH",
     range_start: "08:30",
     range_end: "09:30",
@@ -90,9 +90,9 @@ function fillStrategyForm(strategy) {
     session_end: "19:30",
     entry_buffer_pct: 0.25,
     entry_buffer_points: 0,
-    stop_points: 500,
+    stop_points: 400,
     first_trail_profit: 400,
-    first_trail_lock_loss: 200,
+    first_trail_lock_loss: 300,
     second_trail_profit: 700,
     volume: 0.01,
   };

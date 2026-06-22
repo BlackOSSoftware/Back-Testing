@@ -65,6 +65,10 @@ class Trade:
     entry_time: str
     entry_price: float
     initial_sl: float
+    first_trail_time: str | None
+    first_trail_sl: float | None
+    two_candle_trail_time: str | None
+    two_candle_trail_sl: float | None
     exit_time: str
     exit_price: float
     exit_reason: str
@@ -78,7 +82,7 @@ class BacktestConfig:
     symbol: str
     from_date: date
     to_date: date
-    data_source: str = "MT5"
+    data_source: str = "DELTA"
     timeframe: str = "M5"
     trail_timeframe: str = "M15"
     range_start: time = time(8, 30)
@@ -88,9 +92,9 @@ class BacktestConfig:
     session_end: time = time(19, 30)
     entry_pattern: str = "BOTH"
     entry_buffer_pct: float = 0.0025
-    stop_points: float = 500.0
+    stop_points: float = 400.0
     first_trail_profit: float = 400.0
-    first_trail_lock_loss: float = 200.0
+    first_trail_lock_loss: float = 300.0
     second_trail_profit: float = 700.0
     data_from_date: date | None = None
     data_to_date: date | None = None
@@ -181,28 +185,27 @@ def detect_broker_time_shift_hours(symbol: str) -> int:
     return 0
 
 
-def previous_two_completed_position(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> int:
-    duration = pd.Timedelta(minutes=TIMEFRAME_MINUTES[timeframe.upper()])
-    cache_key = f"completed_times_{timeframe.upper()}"
-    completed_times = candles.attrs.get(cache_key)
-    if completed_times is None:
-        completed_times = (candles["time_ist"] + duration).reset_index(drop=True)
-        candles.attrs[cache_key] = completed_times
-    return int(completed_times.searchsorted(pd.Timestamp(candle_time), side="right"))
+def current_and_previous_trail_position(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> int:
+    cache_key = f"start_times_{timeframe.upper()}"
+    start_times = candles.attrs.get(cache_key)
+    if start_times is None:
+        start_times = candles["time_ist"].reset_index(drop=True)
+        candles.attrs[cache_key] = start_times
+    return int(start_times.searchsorted(pd.Timestamp(candle_time), side="right")) - 1
 
 
-def previous_two_completed_low(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> float | None:
-    position = previous_two_completed_position(candles, candle_time, timeframe)
-    if position < 2:
+def current_and_previous_low(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> float | None:
+    position = current_and_previous_trail_position(candles, candle_time, timeframe)
+    if position < 1:
         return None
-    return float(candles.iloc[position - 2 : position]["low"].min())
+    return float(candles.iloc[position - 1 : position + 1]["low"].min())
 
 
-def previous_two_completed_high(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> float | None:
-    position = previous_two_completed_position(candles, candle_time, timeframe)
-    if position < 2:
+def current_and_previous_high(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> float | None:
+    position = current_and_previous_trail_position(candles, candle_time, timeframe)
+    if position < 1:
         return None
-    return float(candles.iloc[position - 2 : position]["high"].max())
+    return float(candles.iloc[position - 1 : position + 1]["high"].max())
 
 
 def choose_first_trigger(row: pd.Series, buy_trigger: float, sell_trigger: float, entry_pattern: str = "BOTH") -> str | None:
@@ -227,15 +230,40 @@ def choose_first_trigger(row: pd.Series, buy_trigger: float, sell_trigger: float
     return None
 
 
+def candle_end_time(candles: pd.DataFrame, idx: int, config: BacktestConfig) -> datetime:
+    if idx + 1 < len(candles):
+        return candles.iloc[idx + 1]["time_ist"]
+    return candles.iloc[idx]["time_ist"] + timedelta(minutes=TIMEFRAME_MINUTES[config.timeframe.upper()])
+
+
+def choose_execution_trigger(
+    candles: pd.DataFrame,
+    buy_trigger: float,
+    sell_trigger: float,
+    entry_pattern: str = "BOTH",
+) -> tuple[str, int, datetime] | None:
+    pattern = (entry_pattern or "BOTH").upper()
+    for idx, row in candles.iterrows():
+        side = choose_first_trigger(row, buy_trigger, sell_trigger, pattern)
+        if side is not None:
+            return side, int(idx), row["time_ist"]
+    return None
+
+
 def manage_buy_trade(
     candles: pd.DataFrame,
     trail_candles: pd.DataFrame,
     start_idx: int,
     entry_price: float,
     config: BacktestConfig,
-) -> tuple[str, float, str, float, float]:
+) -> tuple[str, float, str, float, float, str | None, float | None, str | None, float | None]:
     stop = entry_price - config.stop_points
     stop_reason = "INITIAL_SL"
+    first_trail_time = None
+    first_trail_sl = None
+    two_candle_trail_time = None
+    two_candle_trail_sl = None
+    second_trail_active = False
     mfe = 0.0
     mae = 0.0
 
@@ -250,25 +278,32 @@ def manage_buy_trade(
         mae = min(mae, low - entry_price)
 
         if low <= stop:
-            return candle_time.isoformat(), stop, stop_reason, mfe, mae
+            return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
         if high >= entry_price + config.first_trail_profit:
             first_trail_stop = entry_price + config.first_trail_lock_loss
             if first_trail_stop > stop:
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
+                first_trail_time = candle_time.isoformat()
+                first_trail_sl = stop
 
         if high >= entry_price + config.second_trail_profit:
-            trail = previous_two_completed_low(trail_candles, candle_time, config.trail_timeframe)
+            second_trail_active = True
+
+        if second_trail_active:
+            trail = current_and_previous_low(trail_candles, candle_time, config.trail_timeframe)
             if trail is not None and trail > stop:
                 stop = trail
                 stop_reason = "TWO_CANDLE_TRAIL_SL"
+                two_candle_trail_time = candle_time.isoformat()
+                two_candle_trail_sl = stop
 
         if candle_time.time() >= config.session_end:
-            return candle_time.isoformat(), close, "FORCE_EXIT", mfe, mae
+            return candle_time.isoformat(), close, "FORCE_EXIT", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
     last = candles.iloc[-1]
-    return last["time_ist"].isoformat(), float(last["close"]), "DATA_END", mfe, mae
+    return last["time_ist"].isoformat(), float(last["close"]), "DATA_END", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
 
 def manage_sell_trade(
@@ -277,9 +312,14 @@ def manage_sell_trade(
     start_idx: int,
     entry_price: float,
     config: BacktestConfig,
-) -> tuple[str, float, str, float, float]:
+) -> tuple[str, float, str, float, float, str | None, float | None, str | None, float | None]:
     stop = entry_price + config.stop_points
     stop_reason = "INITIAL_SL"
+    first_trail_time = None
+    first_trail_sl = None
+    two_candle_trail_time = None
+    two_candle_trail_sl = None
+    second_trail_active = False
     mfe = 0.0
     mae = 0.0
 
@@ -294,30 +334,43 @@ def manage_sell_trade(
         mae = min(mae, entry_price - high)
 
         if high >= stop:
-            return candle_time.isoformat(), stop, stop_reason, mfe, mae
+            return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
         if low <= entry_price - config.first_trail_profit:
             first_trail_stop = entry_price - config.first_trail_lock_loss
             if first_trail_stop < stop:
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
+                first_trail_time = candle_time.isoformat()
+                first_trail_sl = stop
 
         if low <= entry_price - config.second_trail_profit:
-            trail = previous_two_completed_high(trail_candles, candle_time, config.trail_timeframe)
+            second_trail_active = True
+
+        if second_trail_active:
+            trail = current_and_previous_high(trail_candles, candle_time, config.trail_timeframe)
             if trail is not None and trail < stop:
                 stop = trail
                 stop_reason = "TWO_CANDLE_TRAIL_SL"
+                two_candle_trail_time = candle_time.isoformat()
+                two_candle_trail_sl = stop
 
         if candle_time.time() >= config.session_end:
-            return candle_time.isoformat(), close, "FORCE_EXIT", mfe, mae
+            return candle_time.isoformat(), close, "FORCE_EXIT", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
     last = candles.iloc[-1]
-    return last["time_ist"].isoformat(), float(last["close"]), "DATA_END", mfe, mae
+    return last["time_ist"].isoformat(), float(last["close"]), "DATA_END", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
 
-def backtest(df: pd.DataFrame, config: BacktestConfig, trail_df: pd.DataFrame | None = None) -> list[Trade]:
+def backtest(
+    df: pd.DataFrame,
+    config: BacktestConfig,
+    trail_df: pd.DataFrame | None = None,
+    execution_df: pd.DataFrame | None = None,
+) -> list[Trade]:
     trades: list[Trade] = []
     trail_df = df if trail_df is None else trail_df
+    execution_df = df if execution_df is None else execution_df
 
     for trade_date, day_df in df.groupby("trade_date", sort=True):
         range_start = ist_datetime(trade_date, config.range_start)
@@ -327,8 +380,12 @@ def backtest(df: pd.DataFrame, config: BacktestConfig, trail_df: pd.DataFrame | 
 
         range_df = day_df[(day_df["time_ist"] >= range_start) & (day_df["time_ist"] < range_end)]
         session_df = day_df[(day_df["time_ist"] >= session_start) & (day_df["time_ist"] <= session_end)].reset_index(drop=True)
+        execution_day_df = execution_df[execution_df["trade_date"] == trade_date]
+        execution_session_df = execution_day_df[
+            (execution_day_df["time_ist"] >= session_start) & (execution_day_df["time_ist"] <= session_end)
+        ].reset_index(drop=True)
 
-        if range_df.empty or session_df.empty:
+        if range_df.empty or session_df.empty or execution_session_df.empty:
             continue
 
         range_high = float(range_df["high"].max())
@@ -343,16 +400,29 @@ def backtest(df: pd.DataFrame, config: BacktestConfig, trail_df: pd.DataFrame | 
             side = choose_first_trigger(row, buy_trigger, sell_trigger, config.entry_pattern)
             if side is None:
                 continue
+            signal_start = row["time_ist"]
+            signal_end = min(candle_end_time(session_df, idx, config), session_end + timedelta(minutes=1))
+            execution_window = execution_session_df[
+                (execution_session_df["time_ist"] >= signal_start) & (execution_session_df["time_ist"] < signal_end)
+            ].reset_index(drop=True)
+            execution_entry = choose_execution_trigger(execution_window, buy_trigger, sell_trigger, config.entry_pattern)
+            if execution_entry is None:
+                continue
+            side, _, entry_time = execution_entry
+            execution_start_matches = execution_session_df["time_ist"] >= entry_time
+            if not bool(execution_start_matches.any()):
+                continue
+            execution_start_idx = int(execution_start_matches.idxmax())
 
             entry_price = buy_trigger if side == "BUY" else sell_trigger
             initial_sl = entry_price - config.stop_points if side == "BUY" else entry_price + config.stop_points
 
             if side == "BUY":
-                exit_time, exit_price, reason, mfe, mae = manage_buy_trade(session_df, trail_df, idx, entry_price, config)
+                exit_time, exit_price, reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl = manage_buy_trade(execution_session_df, trail_df, execution_start_idx, entry_price, config)
                 pnl = exit_price - entry_price
                 trigger = buy_trigger
             else:
-                exit_time, exit_price, reason, mfe, mae = manage_sell_trade(session_df, trail_df, idx, entry_price, config)
+                exit_time, exit_price, reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl = manage_sell_trade(execution_session_df, trail_df, execution_start_idx, entry_price, config)
                 pnl = entry_price - exit_price
                 trigger = sell_trigger
 
@@ -364,9 +434,13 @@ def backtest(df: pd.DataFrame, config: BacktestConfig, trail_df: pd.DataFrame | 
                     range_high=round(range_high, 2),
                     range_low=round(range_low, 2),
                     trigger_price=round(trigger, 2),
-                    entry_time=row["time_ist"].isoformat(),
+                    entry_time=entry_time.isoformat(),
                     entry_price=round(entry_price, 2),
                     initial_sl=round(initial_sl, 2),
+                    first_trail_time=first_trail_time,
+                    first_trail_sl=round(first_trail_sl, 2) if first_trail_sl is not None else None,
+                    two_candle_trail_time=two_candle_trail_time,
+                    two_candle_trail_sl=round(two_candle_trail_sl, 2) if two_candle_trail_sl is not None else None,
                     exit_time=exit_time,
                     exit_price=round(exit_price, 2),
                     exit_reason=reason,
@@ -422,6 +496,7 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
             "data_to_date": config.data_to_date.isoformat() if config.data_to_date else None,
             "timeframe": config.timeframe.upper(),
             "trail_timeframe": config.trail_timeframe.upper(),
+            "execution_timeframe": "M1",
             "timezone": "Asia/Kolkata",
             "range_start": config.range_start.strftime("%H:%M"),
             "range_end": config.range_end.strftime("%H:%M"),
@@ -510,7 +585,7 @@ def main() -> None:
     parser.add_argument("--entry-cutoff", default="18:00", type=parse_time, help="Last time a new entry may trigger, HH:MM IST.")
     parser.add_argument("--session-end", default="19:30", type=parse_time, help="Forced exit time for running trades, HH:MM IST.")
     parser.add_argument("--buffer-pct", default=0.25, type=float, help="Entry buffer percent. 0.25 means 0.25 percent.")
-    parser.add_argument("--stop-points", default=500.0, type=float, help="Initial stop-loss points.")
+    parser.add_argument("--stop-points", default=400.0, type=float, help="Initial stop-loss points.")
     args = parser.parse_args()
 
     config = BacktestConfig(
@@ -541,7 +616,17 @@ def main() -> None:
             timeframe=config.trail_timeframe,
         )
         trail_df = fetch_rates(trail_config)
-    trades = backtest(df, config, trail_df)
+    if config.timeframe.upper() == "M1":
+        execution_df = df
+    else:
+        execution_config = BacktestConfig(
+            symbol=config.symbol,
+            from_date=config.from_date,
+            to_date=config.to_date,
+            timeframe="M1",
+        )
+        execution_df = fetch_rates(execution_config)
+    trades = backtest(df, config, trail_df, execution_df)
     summary = build_summary(trades, config)
     write_outputs(summary)
 

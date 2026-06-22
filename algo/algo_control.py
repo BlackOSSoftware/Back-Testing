@@ -10,15 +10,15 @@ import MetaTrader5 as mt5
 from flask import Blueprint, jsonify, request, send_from_directory
 
 from .app_paths import INSTANCE_DIR, RESOURCE_DIR
-from .backtest_mt5 import (
+from .strategy_core import (
     BacktestConfig,
     IST,
     choose_first_trigger,
     clear_rates_cache,
+    current_and_previous_high,
+    current_and_previous_low,
     ist_datetime,
     parse_time,
-    previous_two_completed_high,
-    previous_two_completed_low,
 )
 from .market_data import fetch_source_rates, normalize_source, validate_source_timeframe
 
@@ -46,6 +46,7 @@ def default_state() -> dict:
         "strategies": [],
         "signal_log": [],
         "trade_log": [],
+        "position_state": {},
         "last_error": "",
         "algo_status": "Stopped.",
         "pending_order_day": "",
@@ -77,14 +78,14 @@ def algo_is_running() -> bool:
 
 
 def normalize_strategy(data: dict) -> dict:
-    source = normalize_source(data.get("data_source", "MT5"))
+    source = normalize_source(data.get("data_source", "DELTA"))
     strategy = {
         "id": str(data.get("id") or f"{datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')}_{secrets.token_hex(3)}"),
         "name": str(data.get("name") or data.get("strategy_name") or f"{data.get('symbol', 'BTCUSD')} {data.get('timeframe', 'M5')}").strip(),
         "data_source": source,
         "symbol": str(data.get("symbol", "BTCUSD")).strip(),
         "timeframe": str(data.get("timeframe", "M5")).upper(),
-        "trail_timeframe": str(data.get("trail_timeframe", data.get("timeframe", "M5"))).upper(),
+        "trail_timeframe": str(data.get("trail_timeframe", "M15")).upper(),
         "entry_pattern": str(data.get("entry_pattern", "BOTH")).upper(),
         "range_start": parse_time(data.get("range_start", "08:30")).strftime("%H:%M"),
         "range_end": parse_time(data.get("range_end", "09:30")).strftime("%H:%M"),
@@ -93,9 +94,9 @@ def normalize_strategy(data: dict) -> dict:
         "session_end": parse_time(data.get("session_end", "19:30")).strftime("%H:%M"),
         "entry_buffer_pct": float(data.get("entry_buffer_pct", 0.25)),
         "entry_buffer_points": float(data.get("entry_buffer_points", 0) or 0),
-        "stop_points": float(data.get("stop_points", 500)),
+        "stop_points": float(data.get("stop_points", 400)),
         "first_trail_profit": float(data.get("first_trail_profit", 400)),
-        "first_trail_lock_loss": float(data.get("first_trail_lock_loss", 200)),
+        "first_trail_lock_loss": float(data.get("first_trail_lock_loss", 300)),
         "second_trail_profit": float(data.get("second_trail_profit", 700)),
         "volume": float(data.get("volume", 0.01) or 0.01),
         "target_points": 0.0,
@@ -503,8 +504,8 @@ def trail_stop_from_candles(strategy: dict, side: str) -> float | None:
     )
     trail_df = fetch_source_rates(trail_config)
     if side == "BUY":
-        return previous_two_completed_low(trail_df, now_ist(), config.trail_timeframe)
-    return previous_two_completed_high(trail_df, now_ist(), config.trail_timeframe)
+        return current_and_previous_low(trail_df, now_ist(), config.trail_timeframe)
+    return current_and_previous_high(trail_df, now_ist(), config.trail_timeframe)
 
 
 def manage_open_positions(strategy: dict, state: dict) -> bool:
@@ -518,7 +519,15 @@ def manage_open_positions(strategy: dict, state: dict) -> bool:
             return False
         positions = mt5_positions(strategy)
         if not positions:
+            state["position_state"] = {}
             return False
+        active_tickets = {str(getattr(position, "ticket")) for position in positions}
+        position_state = {
+            ticket: value
+            for ticket, value in dict(state.get("position_state") or {}).items()
+            if ticket in active_tickets
+        }
+        state["position_state"] = position_state
         tick = mt5.symbol_info_tick(symbol)
         info = mt5.symbol_info(symbol)
         if tick is None or info is None:
@@ -533,27 +542,38 @@ def manage_open_positions(strategy: dict, state: dict) -> bool:
             return True
 
         for position in positions:
+            ticket = str(getattr(position, "ticket"))
+            trail_state = position_state.setdefault(ticket, {})
             side = position_side(position)
             entry = float(getattr(position, "price_open"))
             current_price = float(tick.bid if side == "BUY" else tick.ask)
             profit_points = current_price - entry if side == "BUY" else entry - current_price
             current_sl = float(getattr(position, "sl", 0.0) or 0.0)
             candidate_sl = None
+            candidate_reason = "TRAIL_SL"
 
             if profit_points >= float(strategy["first_trail_profit"]):
                 first_sl = entry + float(strategy["first_trail_lock_loss"]) if side == "BUY" else entry - float(strategy["first_trail_lock_loss"])
                 candidate_sl = first_sl
 
+            second_trail_active = bool(trail_state.get("second_trail_active") or trail_state.get("second_trail_checked"))
             if profit_points >= float(strategy["second_trail_profit"]):
+                second_trail_active = True
+                trail_state["second_trail_active"] = True
+                trail_state["second_trail_checked"] = True
+                trail_state.setdefault("second_trail_time", current.isoformat())
+
+            if second_trail_active:
                 candle_sl = trail_stop_from_candles(strategy, side)
                 if candle_sl is not None:
                     candidate_sl = candle_sl if candidate_sl is None else (max(candidate_sl, candle_sl) if side == "BUY" else min(candidate_sl, candle_sl))
+                    candidate_reason = "TWO_CANDLE_TRAIL_SL"
 
             if candidate_sl is None:
                 continue
             is_better = candidate_sl > current_sl if side == "BUY" else (current_sl <= 0 or candidate_sl < current_sl)
             if is_better:
-                modify_position_sl(strategy, position, candidate_sl, info, state, "TRAIL_SL")
+                modify_position_sl(strategy, position, candidate_sl, info, state, candidate_reason)
         return True
     finally:
         mt5.shutdown()
