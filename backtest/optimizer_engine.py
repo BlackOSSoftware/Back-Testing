@@ -223,6 +223,103 @@ def build_entry_layout(df: pd.DataFrame, config: BacktestConfig) -> EntryLayout:
     )
 
 
+def build_execution_layout(signal_df: pd.DataFrame, execution_df: pd.DataFrame, config: BacktestConfig) -> EntryLayout:
+    empty_i = np.array([], dtype=np.int64)
+    empty_f = np.array([], dtype=np.float64)
+    empty_b = np.array([], dtype=np.bool_)
+    if signal_df.empty or execution_df.empty:
+        return EntryLayout(empty_i, empty_i, empty_i, empty_f, empty_f, empty_i, empty_f, empty_f, empty_f, empty_f, empty_b)
+
+    signal = signal_df.sort_values("time_ist")
+    execution = execution_df.sort_values("time_ist")
+    signal_source = layout_source(signal_df)
+    execution_source = layout_source(execution_df)
+    tz = execution["time_ist"].dt.tz
+
+    signal_times = signal_source["times"]
+    signal_highs = signal_source["highs"]
+    signal_lows = signal_source["lows"]
+    execution_times = execution_source["times"]
+    execution_dates = execution_source["dates"]
+    execution_opens = execution_source["opens"]
+    execution_highs = execution_source["highs"]
+    execution_lows = execution_source["lows"]
+    execution_closes = execution_source["closes"]
+
+    starts = []
+    ends = []
+    cutoff_ends = []
+    range_highs = []
+    range_lows = []
+    index_blocks = []
+    end_flags = []
+    offset = 0
+
+    for trade_date in sorted(set(execution_dates)):
+        if trade_date < config.from_date or trade_date > config.to_date:
+            continue
+
+        range_start = window_timestamp(trade_date, config.range_start, tz)
+        range_end = window_timestamp(trade_date, config.range_end, tz)
+        while range_end <= range_start:
+            range_end += pd.Timedelta(days=1)
+
+        session_start = window_timestamp(trade_date, config.session_start, tz)
+        while session_start < range_end:
+            session_start += pd.Timedelta(days=1)
+
+        entry_cutoff = window_timestamp(trade_date, config.entry_cutoff, tz)
+        while entry_cutoff < session_start:
+            entry_cutoff += pd.Timedelta(days=1)
+
+        session_end = window_timestamp(trade_date, config.session_end, tz)
+        while session_end <= session_start:
+            session_end += pd.Timedelta(days=1)
+
+        range_left = int(np.searchsorted(signal_times, range_start.value, side="left"))
+        range_right = int(np.searchsorted(signal_times, range_end.value, side="left"))
+        session_left = int(np.searchsorted(execution_times, session_start.value, side="left"))
+        session_right = int(np.searchsorted(execution_times, session_end.value, side="right"))
+        if range_left >= range_right or session_left >= session_right:
+            continue
+
+        session_indices = np.arange(session_left, session_right, dtype=np.int64)
+        size = len(session_indices)
+        starts.append(offset)
+        ends.append(offset + size)
+
+        cutoff_right = int(np.searchsorted(execution_times, entry_cutoff.value, side="right"))
+        cutoff_ends.append(offset + max(0, min(size, cutoff_right - session_left)))
+        range_highs.append(float(np.max(signal_highs[range_left:range_right])))
+        range_lows.append(float(np.min(signal_lows[range_left:range_right])))
+        index_blocks.append(session_indices)
+
+        flags = np.zeros(size, dtype=np.bool_)
+        flags[execution_times[session_indices] >= session_end.value] = True
+        if not bool(flags.any()):
+            flags[-1] = True
+        end_flags.append(flags)
+        offset += size
+
+    if not index_blocks:
+        return EntryLayout(empty_i, empty_i, empty_i, empty_f, empty_f, empty_i, empty_f, empty_f, empty_f, empty_f, empty_b)
+
+    session_indices = np.concatenate(index_blocks)
+    return EntryLayout(
+        day_starts=np.asarray(starts, dtype=np.int64),
+        day_ends=np.asarray(ends, dtype=np.int64),
+        cutoff_ends=np.asarray(cutoff_ends, dtype=np.int64),
+        range_highs=np.asarray(range_highs, dtype=np.float64),
+        range_lows=np.asarray(range_lows, dtype=np.float64),
+        times_ns=execution_times[session_indices],
+        opens=execution_opens[session_indices],
+        highs=execution_highs[session_indices],
+        lows=execution_lows[session_indices],
+        closes=execution_closes[session_indices],
+        at_session_end=np.concatenate(end_flags),
+    )
+
+
 def build_scan_context(layout: EntryLayout, trail_df: pd.DataFrame, trail_timeframe: str) -> ScanContext:
     count = len(layout.times_ns)
     trailing_lows = np.full(count, np.nan, dtype=np.float64)

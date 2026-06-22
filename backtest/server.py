@@ -42,7 +42,7 @@ from .market_data import (
     normalize_source,
     validate_source_timeframe,
 )
-from .optimizer_engine import ScanContext, build_entry_layout, build_scan_context, evaluate_scan_batch, warm_optimizer_engine
+from .optimizer_engine import ScanContext, build_entry_layout, build_execution_layout, build_scan_context, evaluate_scan_batch, warm_optimizer_engine
 
 
 prepare_runtime()
@@ -873,7 +873,10 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                         status="running",
                         message=f"Preparing layouts... {len(layouts)} built, {len(contexts)} contexts ready",
                     )
-                layouts[layout_key] = build_entry_layout(entry_df, layout_config)
+                if use_m5_derived_frames:
+                    layouts[layout_key] = build_execution_layout(entry_df, candle_frame("M5", False), layout_config)
+                else:
+                    layouts[layout_key] = build_entry_layout(entry_df, layout_config)
             trail_df = entry_df if trail_timeframe == entry_timeframe else candle_frame(trail_timeframe, True)
             if len(contexts) % 50 == 0:
                 update_progress(
