@@ -410,6 +410,9 @@ def scan_time_profiles(data: dict) -> list[dict]:
     range_starts = scan_values(data, "range_start_values", [data.get("range_start", "08:30")], parse_time, maximum=24)
     durations = scan_values(data, "range_duration_values", [60], int, maximum=6)
     session_ends = scan_values(data, "session_end_values", [data.get("session_end", "19:30")], parse_time, maximum=24)
+    setup_session_end = ensure_time(data.get("session_end", "19:30"))
+    if setup_session_end not in session_ends:
+        session_ends.append(setup_session_end)
     entry_cutoff_values = (
         scan_values(data, "entry_cutoff_values", [], parse_time, maximum=12)
         if str(data.get("entry_cutoff_values", "")).strip()

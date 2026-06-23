@@ -20,6 +20,7 @@ class OptimizerPayloadTest(unittest.TestCase):
                 "range_duration_values": "60",
                 "entry_cutoff": "19:00",
                 "entry_cutoff_values": "",
+                "session_end": "21:30",
                 "session_end_values": "21:30",
             }
         )
@@ -27,6 +28,20 @@ class OptimizerPayloadTest(unittest.TestCase):
         self.assertEqual(len(profiles), 1)
         self.assertEqual(profiles[0]["entry_cutoff"], time(19, 0))
         self.assertEqual(profiles[0]["session_end"], time(21, 30))
+
+    def test_optimizer_includes_setup_force_exit_time(self) -> None:
+        profiles = scan_time_profiles(
+            {
+                "range_start_values": "08:30",
+                "range_duration_values": "60",
+                "entry_cutoff": "19:00",
+                "entry_cutoff_values": "",
+                "session_end": "21:30",
+                "session_end_values": "19:30,20:00",
+            }
+        )
+
+        self.assertIn(time(21, 30), {profile["session_end"] for profile in profiles})
 
     def test_optimizer_rejects_cutoff_at_force_exit_time(self) -> None:
         profiles = scan_time_profiles(
