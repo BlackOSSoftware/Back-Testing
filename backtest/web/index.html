@@ -338,6 +338,10 @@
               <input name="stop_on_target" type="checkbox" />
               <span>Stop scan after a qualifying setting reaches target <button class="info-btn" type="button" title="On hoga to pehli qualified setting milte hi scan stop ho jayega. Off hoga to saare combinations compare honge.">?</button></span>
             </label>
+            <label class="optimizer-check">
+              <input name="save_full_csv" type="checkbox" />
+              <span>Save full scan CSV <button class="info-btn" type="button" title="Off rakhne par VPS fast chalega aur sirf top results CSV me save honge. On karne par har tested setting CSV me likhi jayegi.">?</button></span>
+            </label>
             <button id="optimizerRunBtn" class="primary-btn optimizer-run" type="submit">
               <i data-lucide="scan-search"></i>
               Start Scan
@@ -1300,6 +1304,7 @@
           ...collectForm(),
           ...scanValues,
           stop_on_target: document.querySelector('[name="stop_on_target"]').checked,
+          save_full_csv: document.querySelector('[name="save_full_csv"]').checked,
         };
       }
 
@@ -1379,11 +1384,15 @@
           : `<tr><td class="empty" colspan="9">No scan result available.</td></tr>`;
         const count = Number(job.result_count ?? optimizerResults.length);
         const meta = document.getElementById("optimizerResultMeta");
+        const fullCsv = Boolean(job.save_full_csv || job.scan_config?.save_full_csv);
         meta.textContent = job.results_truncated
-          ? `Showing top ${optimizerResults.length} of ${count} tested settings. Export CSV for the full record.`
+          ? fullCsv
+            ? `Showing top ${optimizerResults.length} of ${count} tested settings. Export CSV for the full record.`
+            : `Showing top ${optimizerResults.length} of ${count} tested settings. Fast mode saves top results CSV.`
           : `${count} tested settings available.`;
         const exportButton = document.getElementById("optimizerExportBtn");
         exportButton.hidden = !count;
+        exportButton.textContent = fullCsv ? "Export Full Scan CSV" : "Export Results CSV";
         exportButton.dataset.source = document.getElementById("dataSourceInput").value || "DELTA";
         exportButton.dataset.symbol = job.scan_config?.symbol || document.getElementById("symbolInput").value || "";
         exportButton.dataset.scanId = job.scan_id || "";
@@ -1520,6 +1529,7 @@
             target_win_rate: Number(document.querySelector('[name="target_win_rate"]').value || 70),
             minimum_trades: Number(document.querySelector('[name="minimum_trades"]').value || 20),
             result_sort: document.querySelector('[name="result_sort"]').value || "BALANCED",
+            save_full_csv: document.querySelector('[name="save_full_csv"]').checked,
             result_count: 0,
             results: [],
           });

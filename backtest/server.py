@@ -12,7 +12,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
 from dataclasses import replace
 from functools import wraps
-from io import BytesIO
+from io import BytesIO, StringIO
 from itertools import product
 from pathlib import Path
 from threading import Lock
@@ -54,7 +54,7 @@ from .market_data import (
     normalize_source,
     validate_source_timeframe,
 )
-from .optimizer_engine import ScanContext, build_entry_layout, build_execution_layout, build_scan_context, evaluate_scan_batch, warm_optimizer_engine
+from .optimizer_engine import ScanContext, build_entry_layout, build_execution_layout, build_scan_context, evaluate_scan_batch_metrics, warm_optimizer_engine
 
 
 prepare_runtime()
@@ -95,10 +95,21 @@ app.config.update(
 )
 HISTORY_CACHE_SECONDS = 300.0
 _history_cache: dict[tuple[str, str, str, str, str], tuple[float, dict]] = {}
+
+
+def optimizer_int_env(name: str, default: int, minimum: int) -> int:
+    try:
+        return max(int(os.getenv(name, str(default))), minimum)
+    except (TypeError, ValueError):
+        return default
+
+
 OPTIMIZER_MAX_COMBINATIONS = 10_000_000
 OPTIMIZER_VISIBLE_RESULTS = 500
-OPTIMIZER_CHECKPOINT_BATCH = 8192
-OPTIMIZER_PROGRESS_EVERY = 10000
+OPTIMIZER_CHECKPOINT_BATCH = optimizer_int_env("OPTIMIZER_CHECKPOINT_BATCH", 65536, 1024)
+OPTIMIZER_PROGRESS_EVERY = optimizer_int_env("OPTIMIZER_PROGRESS_EVERY", 25000, 1000)
+OPTIMIZER_CHECKPOINT_EVERY = max(optimizer_int_env("OPTIMIZER_CHECKPOINT_EVERY", 250000, 1000), OPTIMIZER_PROGRESS_EVERY)
+OPTIMIZER_SAVE_FULL_CSV_DEFAULT = os.getenv("OPTIMIZER_SAVE_FULL_CSV", "").lower() in {"1", "true", "yes", "on"}
 OPTIMIZER_RUNS_DIR = RESULTS_DIR / "optimizer_runs"
 _optimizer_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="optimizer")
 _optimizer_warmup_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="optimizer-warmup")
@@ -525,6 +536,7 @@ def optimizer_payload(data: dict) -> dict:
         "minimum_trades": max(int(data.get("minimum_trades", 20)), 1),
         "result_sort": str(data.get("result_sort", "BALANCED")).upper() if str(data.get("result_sort", "BALANCED")).upper() in OPTIMIZER_RESULT_SORTS else "BALANCED",
         "stop_on_target": str(data.get("stop_on_target", "false")).lower() in {"true", "1", "on", "yes"},
+        "save_full_csv": str(data.get("save_full_csv", OPTIMIZER_SAVE_FULL_CSV_DEFAULT)).lower() in {"true", "1", "on", "yes"},
         "total": total,
     }
 
@@ -558,6 +570,135 @@ def optimization_row(config: BacktestConfig, stats: dict, qualified: bool, teste
         "profit_factor": None if stats["profit_factor"] is None else float(stats["profit_factor"]),
         "max_drawdown_points": float(stats["max_drawdown_points"]),
     }
+
+
+def optimizer_stats_from_metric(metric) -> dict:
+    total, wins, losses, gross_profit, gross_loss, net, max_drawdown = metric
+    return {
+        "total_trades": int(total),
+        "wins": int(wins),
+        "losses": int(losses),
+        "win_rate_pct": round((wins / total) * 100, 2) if total else 0.0,
+        "net_points": round(float(net), 2),
+        "profit_factor": round(float(gross_profit / abs(gross_loss)), 2) if gross_loss else None,
+        "max_drawdown_points": round(float(max_drawdown), 2),
+    }
+
+
+def optimizer_metric_arrays(metrics: np.ndarray, minimum_trades: int, target_win_rate: float) -> dict[str, np.ndarray]:
+    total = metrics[:, 0]
+    wins = metrics[:, 1]
+    win_rate = np.divide(wins * 100.0, total, out=np.zeros_like(wins), where=total > 0)
+    win_rate = np.round(win_rate, 2)
+    gross_profit = metrics[:, 3]
+    gross_loss = metrics[:, 4]
+    profit_factor = np.divide(gross_profit, np.abs(gross_loss), out=np.zeros_like(gross_profit), where=gross_loss != 0)
+    profit_factor = np.round(profit_factor, 2)
+    net_points = np.round(metrics[:, 5], 2)
+    drawdown = np.abs(np.round(metrics[:, 6], 2))
+    trades = total.astype(np.float64)
+    qualified = ((trades >= minimum_trades) & (win_rate >= target_win_rate)).astype(np.float64)
+    return {
+        "qualified": qualified,
+        "win_rate": win_rate,
+        "net_points": net_points,
+        "profit_factor": profit_factor,
+        "trades": trades,
+        "drawdown": drawdown,
+    }
+
+
+def optimizer_metric_sort_keys(metrics: np.ndarray, minimum_trades: int, target_win_rate: float, mode: str) -> tuple[np.ndarray, ...]:
+    arrays = optimizer_metric_arrays(metrics, minimum_trades, target_win_rate)
+    mode = mode if mode in OPTIMIZER_RESULT_SORTS else "BALANCED"
+    if mode == "WIN_RATE":
+        return (arrays["qualified"], arrays["win_rate"], arrays["net_points"], arrays["profit_factor"], arrays["trades"])
+    if mode == "NET_POINTS":
+        return (arrays["qualified"], arrays["net_points"], arrays["win_rate"], arrays["profit_factor"], arrays["trades"])
+    if mode == "LOWEST_TRADES":
+        return (arrays["qualified"], -arrays["trades"], arrays["win_rate"], arrays["net_points"], arrays["profit_factor"])
+    if mode == "WIN_POINTS":
+        return (arrays["qualified"], arrays["win_rate"], arrays["net_points"], -arrays["drawdown"], arrays["trades"])
+    return (arrays["qualified"], arrays["win_rate"], arrays["net_points"], arrays["trades"], arrays["profit_factor"], -arrays["drawdown"])
+
+
+def optimizer_top_metric_indices(metrics: np.ndarray, minimum_trades: int, target_win_rate: float, mode: str, limit: int) -> np.ndarray:
+    if len(metrics) <= limit:
+        return np.arange(len(metrics))
+    keys = optimizer_metric_sort_keys(metrics, minimum_trades, target_win_rate, mode)
+    order = np.lexsort(tuple(-key for key in reversed(keys)))
+    return order[:limit]
+
+
+def optimizer_qualified_mask(metrics: np.ndarray, minimum_trades: int, target_win_rate: float) -> np.ndarray:
+    arrays = optimizer_metric_arrays(metrics, minimum_trades, target_win_rate)
+    return arrays["qualified"].astype(np.bool_)
+
+
+def optimization_row_from_metric(
+    profile: dict,
+    entry_tf: str,
+    trail_tf: str,
+    distance_units: dict,
+    parameter_values,
+    metric,
+    qualified: bool,
+    tested: int,
+    entry_pattern: str,
+) -> dict:
+    stats = optimizer_stats_from_metric(metric)
+    return {
+        "rank": int(tested),
+        "qualified": bool(qualified),
+        "entry_pattern": entry_pattern,
+        "timeframe": entry_tf,
+        "trail_timeframe": trail_tf,
+        "range_start": profile["range_start"].strftime("%H:%M"),
+        "range_end": profile["range_end"].strftime("%H:%M"),
+        "session_start": profile["session_start"].strftime("%H:%M"),
+        "entry_cutoff": profile["entry_cutoff"].strftime("%H:%M"),
+        "session_end": profile["session_end"].strftime("%H:%M"),
+        "entry_buffer_pct": round(float(parameter_values[0] * 100), 6),
+        "stop_points": float(parameter_values[1]),
+        "stop_points_unit": distance_units.get("stop_points_unit", "POINTS"),
+        "first_trail_profit": float(parameter_values[2]),
+        "first_trail_profit_unit": distance_units.get("first_trail_profit_unit", "POINTS"),
+        "first_trail_lock_loss": float(parameter_values[3]),
+        "first_trail_lock_loss_unit": distance_units.get("first_trail_lock_loss_unit", "POINTS"),
+        "second_trail_profit": float(parameter_values[4]),
+        "second_trail_profit_unit": distance_units.get("second_trail_profit_unit", "POINTS"),
+        "total_trades": stats["total_trades"],
+        "wins": stats["wins"],
+        "losses": stats["losses"],
+        "win_rate_pct": stats["win_rate_pct"],
+        "net_points": stats["net_points"],
+        "profit_factor": stats["profit_factor"],
+        "max_drawdown_points": stats["max_drawdown_points"],
+    }
+
+
+def optimizer_parameter_chunks(parameters: dict, chunk_size: int):
+    chunk = np.empty((chunk_size, 5), dtype=np.float64)
+    index = 0
+    for buffer_pct, stop, first_profit, first_lock, second_profit in product(
+        parameters["entry_buffer_pct"],
+        parameters["stop_points"],
+        parameters["first_trail_profit"],
+        parameters["first_trail_lock_loss"],
+        parameters["second_trail_profit"],
+    ):
+        chunk[index, 0] = buffer_pct / 100
+        chunk[index, 1] = stop
+        chunk[index, 2] = first_profit
+        chunk[index, 3] = first_lock
+        chunk[index, 4] = second_profit
+        index += 1
+        if index == chunk_size:
+            yield chunk
+            chunk = np.empty((chunk_size, 5), dtype=np.float64)
+            index = 0
+    if index:
+        yield chunk[:index].copy()
 
 
 def optimizer_rank_key(row: dict, mode: str = "BALANCED") -> tuple:
@@ -621,6 +762,7 @@ def optimizer_scan_config(payload: dict) -> dict:
         "minimum_trades": payload["minimum_trades"],
         "result_sort": payload.get("result_sort", "BALANCED"),
         "stop_on_target": payload["stop_on_target"],
+        "save_full_csv": payload.get("save_full_csv", False),
     }
 
 
@@ -915,17 +1057,6 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
         adjusted_layout = replace(base_context.layout, cutoff_ends=cutoff_ends_for_layout(base_context.layout, profile["entry_cutoff"]))
         return ScanContext(layout=adjusted_layout, trail_lows=base_context.trail_lows, trail_highs=base_context.trail_highs)
 
-    parameters = list(product(
-        payload["parameters"]["entry_buffer_pct"],
-        payload["parameters"]["stop_points"],
-        payload["parameters"]["first_trail_profit"],
-        payload["parameters"]["first_trail_lock_loss"],
-        payload["parameters"]["second_trail_profit"],
-    ))
-    numeric_parameters = [
-        (buffer_pct / 100, stop, first_profit, first_lock, second_profit)
-        for buffer_pct, stop, first_profit, first_lock, second_profit in parameters
-    ]
     try:
         update_progress(
             status="running",
@@ -933,6 +1064,7 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
         )
         stop_scan = False
         next_progress = OPTIMIZER_PROGRESS_EVERY
+        next_checkpoint = OPTIMIZER_CHECKPOINT_EVERY
         last_progress = monotonic()
         for profile in payload["time_profiles"]:
             if stop_scan:
@@ -953,48 +1085,62 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                                 message=f"Preparing scan contexts for {entry_tf}/{trail_tf}...",
                             )
                         context = scan_context(entry_tf, trail_tf, profile)
-                        for chunk_start in range(0, len(numeric_parameters), OPTIMIZER_CHECKPOINT_BATCH):
-                            chunk_end = chunk_start + OPTIMIZER_CHECKPOINT_BATCH
-                            chunk_parameters = parameters[chunk_start:chunk_end]
-                            stats_rows = evaluate_scan_batch(
+                        for parameter_chunk in optimizer_parameter_chunks(payload["parameters"], OPTIMIZER_CHECKPOINT_BATCH):
+                            metrics = evaluate_scan_batch_metrics(
                                 context,
-                                numeric_parameters[chunk_start:chunk_end],
+                                parameter_chunk,
                                 side_filter=side_filter,
                                 stop_points_unit=distance_units.get("stop_points_unit", "POINTS"),
                                 first_trail_profit_unit=distance_units.get("first_trail_profit_unit", "POINTS"),
                                 first_trail_lock_loss_unit=distance_units.get("first_trail_lock_loss_unit", "POINTS"),
                                 second_trail_profit_unit=distance_units.get("second_trail_profit_unit", "POINTS"),
                             )
-                            chunk_rows = []
-                            for values, stats in zip(chunk_parameters, stats_rows):
-                                tested += 1
-                                buffer_pct, stop, first_profit, first_lock, second_profit = values
-                                config = BacktestConfig(
-                                    **common,
-                                    **profile,
-                                    timeframe=entry_tf,
-                                    trail_timeframe=trail_tf,
-                                    entry_buffer_pct=buffer_pct / 100,
-                                    stop_points=stop,
-                                    first_trail_profit=first_profit,
-                                    first_trail_lock_loss=first_lock,
-                                    second_trail_profit=second_profit,
-                                    **distance_units,
-                                )
-                                qualified = stats["total_trades"] >= payload["minimum_trades"] and stats["win_rate_pct"] >= payload["target_win_rate"]
-                                row = optimization_row(config, stats, qualified, tested, entry_pattern)
-                                chunk_rows.append(row)
-                                csv_buffer.append(row)
-                                if qualified and payload["stop_on_target"]:
+                            qualified_mask = optimizer_qualified_mask(metrics, payload["minimum_trades"], payload["target_win_rate"])
+                            processed_count = len(metrics)
+                            if payload["stop_on_target"]:
+                                target_indices = np.flatnonzero(qualified_mask)
+                                if len(target_indices):
+                                    processed_count = int(target_indices[0]) + 1
                                     stop_scan = True
-                                    break
+                            if processed_count != len(metrics):
+                                metrics = metrics[:processed_count]
+                                parameter_chunk = parameter_chunk[:processed_count]
+                                qualified_mask = qualified_mask[:processed_count]
+                            tested_start = tested
+                            tested += processed_count
+                            chunk_rows = []
+                            if payload.get("save_full_csv"):
+                                row_indices = range(processed_count)
+                            else:
+                                row_indices = optimizer_top_metric_indices(
+                                    metrics,
+                                    payload["minimum_trades"],
+                                    payload["target_win_rate"],
+                                    payload.get("result_sort", "BALANCED"),
+                                    OPTIMIZER_VISIBLE_RESULTS,
+                                )
+                            for local_index in row_indices:
+                                row = optimization_row_from_metric(
+                                    profile,
+                                    entry_tf,
+                                    trail_tf,
+                                    distance_units,
+                                    parameter_chunk[int(local_index)],
+                                    metrics[int(local_index)],
+                                    bool(qualified_mask[int(local_index)]),
+                                    tested_start + int(local_index) + 1,
+                                    entry_pattern,
+                                )
+                                chunk_rows.append(row)
+                                if payload.get("save_full_csv"):
+                                    csv_buffer.append(row)
                             if chunk_rows:
                                 results[:] = heapq.nlargest(
                                     OPTIMIZER_VISIBLE_RESULTS,
                                     [*results, *chunk_rows],
                                     key=lambda row: optimizer_rank_key(row, payload.get("result_sort", "BALANCED")),
                                 )
-                            target_found = target_found or any(row["qualified"] for row in chunk_rows)
+                            target_found = target_found or bool(np.any(qualified_mask))
                             now = monotonic()
                             report_progress = (
                                 stop_scan
@@ -1006,26 +1152,29 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                                 update_progress(
                                     tested=tested,
                                     progress_pct=round((tested / payload["total"]) * 100, 1),
-                                    best_win_rate=max(row["win_rate_pct"] for row in results),
+                                    best_win_rate=max((row["win_rate_pct"] for row in results), default=0.0),
                                     elapsed_seconds=round(monotonic() - started, 2),
                                     message=f"Tested {tested} of {payload['total']} settings",
                                 )
                                 last_progress = now
-                            if stop_scan or tested >= payload["total"] or tested >= next_progress:
+                                while next_progress <= tested:
+                                    next_progress += OPTIMIZER_PROGRESS_EVERY
+                            if stop_scan or tested >= payload["total"] or tested >= next_checkpoint:
                                 checkpoint(
-                                    csv_rows=csv_buffer,
+                                    csv_rows=csv_buffer if payload.get("save_full_csv") else None,
                                     replace_csv=not csv_started,
                                     status="running",
                                     tested=tested,
                                     progress_pct=round((tested / payload["total"]) * 100, 1),
-                                    best_win_rate=max(row["win_rate_pct"] for row in results),
+                                    best_win_rate=max((row["win_rate_pct"] for row in results), default=0.0),
                                     elapsed_seconds=round(monotonic() - started, 2),
                                     message=f"Tested {tested} of {payload['total']} settings",
                                 )
                                 csv_buffer.clear()
-                                csv_started = True
-                                while next_progress <= tested:
-                                    next_progress += OPTIMIZER_PROGRESS_EVERY
+                                if payload.get("save_full_csv"):
+                                    csv_started = True
+                                while next_checkpoint <= tested:
+                                    next_checkpoint += OPTIMIZER_CHECKPOINT_EVERY
                             if stop_scan:
                                 break
                         if stop_scan:
@@ -1053,7 +1202,8 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
         for rank, row in enumerate(ranked_rows, start=1):
             row["rank"] = rank
         results[:] = ranked_rows
-        checkpoint(csv_rows=csv_buffer, replace_csv=not csv_started, **final)
+        final_csv_rows = csv_buffer if payload.get("save_full_csv") else ranked_rows
+        checkpoint(csv_rows=final_csv_rows, replace_csv=not csv_started or not payload.get("save_full_csv"), **final)
     except Exception as exc:
         checkpoint(
             csv_rows=csv_buffer,
@@ -1463,6 +1613,7 @@ def start_optimizer():
                     "source": common["data_source"],
                     "symbol": common["symbol"],
                     "total": active_job["total"],
+                    "save_full_csv": active_job.get("save_full_csv", False),
                     "reused": True,
                 }
             )
@@ -1480,6 +1631,7 @@ def start_optimizer():
             "target_win_rate": payload["target_win_rate"],
             "minimum_trades": payload["minimum_trades"],
             "result_sort": payload["result_sort"],
+            "save_full_csv": payload["save_full_csv"],
             "created_at": created_at,
             "updated_at": created_at,
             "result_count": 0,
@@ -1498,6 +1650,7 @@ def start_optimizer():
                 "source": common["data_source"],
                 "symbol": common["symbol"],
                 "total": payload["total"],
+                "save_full_csv": payload["save_full_csv"],
             }
         )
     except Exception as exc:
@@ -1584,7 +1737,20 @@ def export_optimizer():
             scan_id = scans[0]["scan_id"]
         path = optimizer_csv_path(source, symbol, scan_id)
         if not path.exists():
-            return jsonify({"error": "No optimizer scan result found."}), 404
+            scan_path = optimizer_output_path(source, symbol, scan_id)
+            if not scan_path.exists():
+                return jsonify({"error": "No optimizer scan result found."}), 404
+            scan = json.loads(scan_path.read_text(encoding="utf-8"))
+            rows = scan.get("results") or []
+            if not rows:
+                return jsonify({"error": "No optimizer scan result found."}), 404
+            text_buffer = StringIO()
+            writer = csv.DictWriter(text_buffer, fieldnames=list(rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(rows)
+            bytes_buffer = BytesIO(text_buffer.getvalue().encode("utf-8"))
+            filename = f"{safe_optimizer_part(symbol).lower()}_{source.lower()}_{scan_id}_optimizer.csv"
+            return send_file(bytes_buffer, mimetype="text/csv", as_attachment=True, download_name=filename)
         filename = f"{safe_optimizer_part(symbol).lower()}_{source.lower()}_{scan_id}_optimizer.csv"
         return send_file(path, as_attachment=True, download_name=filename)
     except Exception as exc:
