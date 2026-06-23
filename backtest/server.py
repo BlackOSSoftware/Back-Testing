@@ -95,7 +95,7 @@ app.config.update(
 )
 HISTORY_CACHE_SECONDS = 300.0
 _history_cache: dict[tuple[str, str, str, str, str], tuple[float, dict]] = {}
-OPTIMIZER_MAX_COMBINATIONS = 2000000
+OPTIMIZER_MAX_COMBINATIONS = 10_000_000
 OPTIMIZER_VISIBLE_RESULTS = 500
 OPTIMIZER_CHECKPOINT_BATCH = 8192
 OPTIMIZER_PROGRESS_EVERY = 10000
@@ -512,7 +512,7 @@ def optimizer_payload(data: dict) -> dict:
     )
     maximum = min(max(int(data.get("max_combinations", OPTIMIZER_MAX_COMBINATIONS)), 1), OPTIMIZER_MAX_COMBINATIONS)
     if total > maximum:
-        raise ValueError(f"Scan has {total} combinations. Reduce values or increase limit up to {OPTIMIZER_MAX_COMBINATIONS}.")
+        raise ValueError(f"Scan has {total:,} combinations. Reduce values or increase limit up to {OPTIMIZER_MAX_COMBINATIONS:,}.")
     return {
         "common": common,
         "entry_timeframes": entry_timeframes,

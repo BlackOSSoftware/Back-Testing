@@ -431,7 +431,7 @@ def _evaluate_kernel(
                     break
                 if highs[idx] + eps >= entry_price + first_profit_distance:
                     candidate = entry_price + first_lock_distance
-                    if candidate > stop + eps:
+                    if highs[idx] + eps >= candidate and candidate > stop + eps:
                         stop = candidate
                 if highs[idx] + eps >= entry_price + second_profit_distance and not second_trail_active:
                     second_trail_active = True
@@ -448,7 +448,7 @@ def _evaluate_kernel(
                     break
                 if lows[idx] <= entry_price - first_profit_distance + eps:
                     candidate = entry_price - first_lock_distance
-                    if candidate < stop - eps:
+                    if lows[idx] <= candidate + eps and candidate < stop - eps:
                         stop = candidate
                 if lows[idx] <= entry_price - second_profit_distance + eps and not second_trail_active:
                     second_trail_active = True

@@ -219,6 +219,31 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertEqual(trades[0].pnl_points, -10.0)
         self.assertEqual(trades[0].pnl_pct, -10.0)
 
+    def test_first_trail_lock_does_not_move_to_unreached_price(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:00", 100.0, 101.0, 99.0, 100.0),
+                ("10:01", 100.0, 101.0, 99.0, 100.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            stop_points=10.0,
+            first_trail_profit=0.0,
+            first_trail_lock_loss=400.0,
+            second_trail_profit=700.0,
+            session_end=time(10, 1),
+        )
+
+        result = manage_buy_trade(execution, execution, 0, 100.0, config)
+
+        self.assertEqual(result[1], 100.0)
+        self.assertEqual(result[2], "FORCE_EXIT")
+        self.assertIsNone(result[5])
+        self.assertIsNone(result[6])
+
     def test_optimizer_percent_stop_is_converted_per_entry(self) -> None:
         layout = EntryLayout(
             day_starts=np.asarray([0], dtype=np.int64),
@@ -254,6 +279,39 @@ class TrailingStopLogicTest(unittest.TestCase):
 
         self.assertEqual(stats["total_trades"], 1)
         self.assertEqual(stats["net_points"], -20.0)
+
+    def test_optimizer_first_lock_does_not_create_unreached_profit(self) -> None:
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([2], dtype=np.int64),
+            cutoff_ends=np.asarray([2], dtype=np.int64),
+            range_highs=np.asarray([100.0], dtype=np.float64),
+            range_lows=np.asarray([90.0], dtype=np.float64),
+            times_ns=np.asarray([candle_time("09:30").value, candle_time("09:31").value], dtype=np.int64),
+            opens=np.asarray([100.0, 100.0], dtype=np.float64),
+            highs=np.asarray([101.0, 101.0], dtype=np.float64),
+            lows=np.asarray([99.0, 99.0], dtype=np.float64),
+            closes=np.asarray([100.0, 100.0], dtype=np.float64),
+            at_session_end=np.asarray([False, True], dtype=np.bool_),
+        )
+        context = ScanContext(
+            layout=layout,
+            trail_lows=np.asarray([np.nan, np.nan], dtype=np.float64),
+            trail_highs=np.asarray([np.nan, np.nan], dtype=np.float64),
+        )
+
+        stats = evaluate_scan(
+            context,
+            0.0,
+            10.0,
+            0.0,
+            400.0,
+            700.0,
+            side_filter=1,
+        )
+
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(stats["net_points"], 0.0)
 
 
 if __name__ == "__main__":

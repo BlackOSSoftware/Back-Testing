@@ -369,7 +369,7 @@ def manage_buy_trade(
 
         if price_at_or_above(high, entry_price + first_profit_distance):
             first_trail_stop = entry_price + first_lock_distance
-            if higher_stop(first_trail_stop, stop):
+            if price_at_or_above(high, first_trail_stop) and higher_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
                 first_trail_time = candle_time.isoformat()
@@ -435,7 +435,7 @@ def manage_sell_trade(
 
         if price_at_or_below(low, entry_price - first_profit_distance):
             first_trail_stop = entry_price - first_lock_distance
-            if lower_stop(first_trail_stop, stop):
+            if price_at_or_below(low, first_trail_stop) and lower_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
                 first_trail_time = candle_time.isoformat()
