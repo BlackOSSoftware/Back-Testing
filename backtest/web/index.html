@@ -152,20 +152,44 @@
               <input name="entry_buffer_pct" type="number" value="0.02" step="0.01" min="0" />
             </label>
             <label>
-              <span class="setup-label tone-red"><i data-lucide="shield-alert"></i>Stop Loss <button class="info-btn" type="button" title="Initial SL points distance. BUY me entry price minus stop loss; SELL me entry price plus stop loss. Example: entry 100000 and stop 750 means BUY SL 99250, SELL SL 100750.">?</button></span>
-              <input name="stop_points" type="number" value="10" step="1" min="0" />
+              <span class="setup-label tone-red"><i data-lucide="shield-alert"></i>Stop Loss <button class="info-btn" type="button" title="Initial SL distance. Points mode uses fixed price distance; percentage mode calculates distance from entry price.">?</button></span>
+              <div class="risk-control">
+                <input name="stop_points" type="number" value="10" step="0.01" min="0" />
+                <select name="stop_points_unit" aria-label="Stop Loss Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <label>
-              <span class="setup-label tone-green"><i data-lucide="target"></i>First Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad first trailing stop active hota hai. Exit nahi hota.">?</button></span>
-              <input name="first_trail_profit" type="number" value="10" step="1" min="0" />
+              <span class="setup-label tone-green"><i data-lucide="target"></i>First Target <button class="info-btn" type="button" title="Is profit distance par first trailing stop active hota hai. Exit nahi hota.">?</button></span>
+              <div class="risk-control">
+                <input name="first_trail_profit" type="number" value="10" step="0.01" min="0" />
+                <select name="first_trail_profit_unit" aria-label="First Target Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <label>
-              <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad BUY me entry ke upar aur SELL me entry ke neeche SL lock points.">?</button></span>
-              <input name="first_trail_lock_loss" type="number" value="0" step="1" min="0" />
+              <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad entry se kitni distance par SL lock hoga.">?</button></span>
+              <div class="risk-control">
+                <input name="first_trail_lock_loss" type="number" value="0" step="0.01" min="0" />
+                <select name="first_trail_lock_loss_unit" aria-label="First SL Lock Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <label>
-              <span class="setup-label tone-purple"><i data-lucide="flag-triangle-right"></i>Second Target <button class="info-btn" type="button" title="Itne points profit me aane ke baad two-candle exit trail active hota hai. Example 700 means +700 points.">?</button></span>
-              <input name="second_trail_profit" type="number" value="20" step="1" min="0" />
+              <span class="setup-label tone-purple"><i data-lucide="flag-triangle-right"></i>Second Target <button class="info-btn" type="button" title="Is profit distance par two-candle exit trail active hota hai.">?</button></span>
+              <div class="risk-control">
+                <input name="second_trail_profit" type="number" value="20" step="0.01" min="0" />
+                <select name="second_trail_profit_unit" aria-label="Second Target Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <div class="setup-save-row">
               <button id="saveStrategyBtn" class="secondary-btn setup-save-btn" type="button">
@@ -249,20 +273,44 @@
               <input name="entry_buffer_values" value="0.05,0.20,0.25" placeholder="0.05,0.20,0.25" />
             </label>
             <label>
-              <span>Stop Loss Values <button class="info-btn" type="button" title="Comma-separated initial SL point distances. Optimizer har value test karega. Example 750 means BUY entry se 750 points neeche SL, SELL entry se 750 points upar SL.">?</button></span>
-              <input name="stop_points_values" value="400,500,300,200" placeholder="400,500,300,200" />
+              <span>Stop Loss Values <button class="info-btn" type="button" title="Comma-separated initial SL distances. Unit selector decides points or percentage.">?</button></span>
+              <div class="risk-control optimizer-risk-control">
+                <input name="stop_points_values" value="400,500,300,200" placeholder="400,500,300,200" />
+                <select name="stop_points_unit" aria-label="Optimizer Stop Loss Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <label>
-              <span>First Trail Profit Values <button class="info-btn" type="button" title="Trade itne points profit me aate hi first trailing SL activate hota hai. Har comma-separated value separately test hogi.">?</button></span>
-              <input name="first_trail_profit_values" value="400,700,600,500" placeholder="400,700,600,500" />
+              <span>First Trail Profit Values <button class="info-btn" type="button" title="Trade is profit distance par first trailing SL activate karega. Har comma-separated value separately test hogi.">?</button></span>
+              <div class="risk-control optimizer-risk-control">
+                <input name="first_trail_profit_values" value="400,700,600,500" placeholder="400,700,600,500" />
+                <select name="first_trail_profit_unit" aria-label="Optimizer First Target Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <label>
-              <span>First Trail Lock Values <button class="info-btn" type="button" title="First trail active hone ke baad SL entry ke opposite side kitne points par lock hoga. Example BUY me entry minus lock; SELL me entry plus lock.">?</button></span>
-              <input name="first_trail_lock_values" value="300,400,200" placeholder="300,400,200" />
+              <span>First Trail Lock Values <button class="info-btn" type="button" title="First trail active hone ke baad SL entry se selected distance par lock hoga.">?</button></span>
+              <div class="risk-control optimizer-risk-control">
+                <input name="first_trail_lock_values" value="300,400,200" placeholder="300,400,200" />
+                <select name="first_trail_lock_loss_unit" aria-label="Optimizer First SL Lock Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <label>
-              <span>Second Target Values <button class="info-btn" type="button" title="Two-candle exit trail activate karne ke profit point values. Comma-separated values optimizer test karega.">?</button></span>
-              <input name="second_trail_profit_values" value="700" placeholder="700,800,1000" />
+              <span>Second Target Values <button class="info-btn" type="button" title="Two-candle exit trail activate karne ke profit distances. Comma-separated values optimizer test karega.">?</button></span>
+              <div class="risk-control optimizer-risk-control">
+                <input name="second_trail_profit_values" value="700" placeholder="700,800,1000" />
+                <select name="second_trail_profit_unit" aria-label="Optimizer Second Target Unit">
+                  <option value="POINTS" selected>Pts</option>
+                  <option value="PERCENT">%</option>
+                </select>
+              </div>
             </label>
             <label>
               <span>Target Win Rate % <button class="info-btn" type="button" title="Optimizer setting ko qualified tab maanega jab win rate is percentage ke barabar ya upar ho.">?</button></span>
@@ -417,7 +465,7 @@
               <button id="nextChartBtn" class="ghost-btn" type="button">Next</button>
               <label class="height-control">
                 <span>Height</span>
-                <input id="chartHeightInput" type="range" min="320" max="760" step="20" value="430" />
+                <input id="chartHeightInput" type="range" min="220" max="560" step="20" value="300" />
               </label>
             </div>
           </div>
@@ -589,6 +637,9 @@
         const number = Number(value);
         return Number.isNaN(number) ? String(value) : number.toLocaleString("en-IN", { maximumFractionDigits: 2 });
       };
+      const unitText = (unit) => String(unit || "POINTS").toUpperCase() === "PERCENT" ? "%" : "pts";
+      const riskValueLabel = (value, unit) => unitText(unit) === "%" ? `${fmt(value)}%` : `${fmt(value)} pts`;
+      const riskRowLabel = (row, key) => riskValueLabel(row?.[key], row?.[`${key}_unit`]);
       const tone = (value) => (Number(value) >= 0 ? "positive" : "negative");
       const timeOnly = (value) => value ? new Date(value).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false }) : "-";
       const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -724,12 +775,16 @@
           session_end: cfg.session_end || "19:30",
           entry_buffer_pct: cfg.entry_buffer_pct ?? 0.25,
           stop_points: cfg.stop_points ?? 400,
+          stop_points_unit: cfg.stop_points_unit || "POINTS",
           first_trail_profit: cfg.first_trail_profit ?? 400,
+          first_trail_profit_unit: cfg.first_trail_profit_unit || "POINTS",
           first_trail_lock_loss: cfg.first_trail_lock_loss ?? 300,
+          first_trail_lock_loss_unit: cfg.first_trail_lock_loss_unit || "POINTS",
           second_trail_profit: cfg.second_trail_profit ?? 700,
+          second_trail_profit_unit: cfg.second_trail_profit_unit || "POINTS",
         };
         Object.entries(values).forEach(([name, value]) => {
-          const input = document.querySelector(`[name="${name}"]`);
+          const input = document.querySelector(`#backtestForm [name="${name}"]`);
           if (input) input.value = value;
         });
         updateSetupFieldWidths();
@@ -754,7 +809,10 @@
       }
 
       function updateSetupFieldWidths() {
-        document.querySelectorAll("#backtestForm input:not([type='hidden']), #backtestForm select").forEach(resizeSetupField);
+        document.querySelectorAll("#backtestForm input:not([type='hidden']), #backtestForm select").forEach((control) => {
+          if (control.closest(".risk-control") && control.tagName === "SELECT") return;
+          resizeSetupField(control);
+        });
       }
 
       async function loadDefaults() {
@@ -925,7 +983,9 @@
         const symbol = document.getElementById("symbolInput").value || (source === "DELTA" ? "BTCUSD" : "BTCUSD#");
         const entryTimeframe = document.getElementById("timeframeInput").value || "M5";
         const trailTimeframe = document.getElementById("trailTimeframeInput").value || entryTimeframe;
-        const secondTarget = document.querySelector('[name="second_trail_profit"]').value || "700";
+        const secondTarget = document.querySelector('#backtestForm [name="second_trail_profit"]').value || "700";
+        const secondTargetUnit = document.querySelector('#backtestForm [name="second_trail_profit_unit"]').value || "POINTS";
+        const secondTargetLabel = riskValueLabel(secondTarget, secondTargetUnit);
         const fromDate = document.getElementById("fromDateInput").value;
         const toDate = document.getElementById("toDateInput").value;
         const el = document.getElementById("historyInfo");
@@ -947,12 +1007,12 @@
             el.querySelector("span:last-child").textContent =
               `Delta ${symbol}: requested ${entryResult.from_date} to ${entryResult.to_date}`;
             document.getElementById("dataNoteText").textContent =
-              `Delta online candles are downloaded in chunks on Run Backtest and stored locally for faster reruns. Entry uses ${entryTimeframe}; +${secondTarget} exit trail uses ${trailTimeframe}.`;
+              `Delta online candles are downloaded in chunks on Run Backtest and stored locally for faster reruns. Entry uses ${entryTimeframe}; +${secondTargetLabel} exit trail uses ${trailTimeframe}.`;
           } else {
             el.querySelector("span:last-child").textContent =
               `Entry ${entryTimeframe}: ${entryResult.from_date} to ${entryResult.to_date} | Trail ${trailTimeframe}: ${trailResult.from_date} to ${trailResult.to_date}`;
             document.getElementById("dataNoteText").textContent =
-              `Local MT5 data: entry candles use ${entryTimeframe}; after +${secondTarget} points, current and previous ${trailTimeframe} candles set the trail exit.`;
+              `Local MT5 data: entry candles use ${entryTimeframe}; after +${secondTargetLabel}, current and previous ${trailTimeframe} candles set the trail exit.`;
           }
         } catch (error) {
           if (requestId !== historyRequestId) return;
@@ -1051,7 +1111,14 @@
         document.getElementById("dataSourceInput").value = values.data_source || "DELTA";
         updateTimeframeOptions(values.timeframe || "M5", values.trail_timeframe || values.timeframe || "M15");
         fillOptimizerTimeframes();
-        Object.entries(values).forEach(([name, value]) => {
+        const mergedValues = {
+          stop_points_unit: "POINTS",
+          first_trail_profit_unit: "POINTS",
+          first_trail_lock_loss_unit: "POINTS",
+          second_trail_profit_unit: "POINTS",
+          ...values,
+        };
+        Object.entries(mergedValues).forEach(([name, value]) => {
           const input = document.querySelector(`#backtestForm [name="${name}"]`);
           if (input) input.value = value;
         });
@@ -1237,7 +1304,7 @@
       }
 
       function optimizerSettingsText(row) {
-        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${fmt(row.stop_points)} | Trail ${fmt(row.first_trail_profit)}/${fmt(row.first_trail_lock_loss)} | 2nd ${fmt(row.second_trail_profit || 700)}`;
+        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${riskRowLabel(row, "stop_points")} | Trail ${riskRowLabel(row, "first_trail_profit")}/${riskRowLabel(row, "first_trail_lock_loss")} | 2nd ${riskValueLabel(row.second_trail_profit ?? 700, row.second_trail_profit_unit)}`;
       }
 
       function optimizerAveragePoints(row) {
@@ -1475,9 +1542,13 @@
           session_end: row.session_end || "19:30",
           entry_buffer_pct: row.entry_buffer_pct,
           stop_points: row.stop_points,
+          stop_points_unit: row.stop_points_unit || "POINTS",
           first_trail_profit: row.first_trail_profit,
+          first_trail_profit_unit: row.first_trail_profit_unit || "POINTS",
           first_trail_lock_loss: row.first_trail_lock_loss,
+          first_trail_lock_loss_unit: row.first_trail_lock_loss_unit || "POINTS",
           second_trail_profit: row.second_trail_profit,
+          second_trail_profit_unit: row.second_trail_profit_unit || "POINTS",
         };
         Object.entries(values).forEach(([name, value]) => {
           const input = document.querySelector(`#backtestForm [name="${name}"]`);
@@ -1493,12 +1564,13 @@
 
       function renderHeader() {
         if (!report) return;
-        const secondTarget = report.config.second_trail_profit || 700;
+        const secondTarget = report.config.second_trail_profit ?? 700;
+        const secondTargetLabel = riskValueLabel(secondTarget, report.config.second_trail_profit_unit);
         document.getElementById("sideSymbol").textContent = report.config.symbol;
-        document.getElementById("sideMeta").textContent = `${report.config.data_source || "MT5"} | Entry ${report.config.timeframe} | +${fmt(secondTarget)} Trail ${report.config.trail_timeframe || report.config.timeframe} | ${report.config.range} | ${report.config.session}`;
+        document.getElementById("sideMeta").textContent = `${report.config.data_source || "MT5"} | Entry ${report.config.timeframe} | +${secondTargetLabel} Trail ${report.config.trail_timeframe || report.config.timeframe} | ${report.config.range} | ${report.config.session}`;
         if (report.config.data_from_date && report.config.data_to_date) {
           document.getElementById("dataNoteText").textContent =
-            `${report.config.data_source === "DELTA" ? "Delta cached online" : "Local MT5"} data used: ${report.config.data_from_date} to ${report.config.data_to_date}. Entry ${report.config.timeframe}; +${fmt(secondTarget)} exit trail ${report.config.trail_timeframe || report.config.timeframe}.`;
+            `${report.config.data_source === "DELTA" ? "Delta cached online" : "Local MT5"} data used: ${report.config.data_from_date} to ${report.config.data_to_date}. Entry ${report.config.timeframe}; +${secondTargetLabel} exit trail ${report.config.trail_timeframe || report.config.timeframe}.`;
         }
       }
 
@@ -1633,10 +1705,15 @@
         return `${fmt(value)}${time}`;
       }
 
+      function pointsPctCell(points, pct) {
+        const pctText = pct !== null && pct !== undefined && pct !== "" ? `<small>${fmt(pct)}%</small>` : "";
+        return `${fmt(points)}${pctText}`;
+      }
+
       function derivedFirstTrailSl(trade) {
         if (trade.first_trail_sl !== null && trade.first_trail_sl !== undefined && trade.first_trail_sl !== "") return trade.first_trail_sl;
-        const firstTarget = Number(report?.config?.first_trail_profit || 0);
-        const firstLock = Number(report?.config?.first_trail_lock_loss || 0);
+        const firstTarget = Number(trade.first_trail_profit_points ?? report?.config?.first_trail_profit ?? 0);
+        const firstLock = Number(trade.first_trail_lock_points ?? report?.config?.first_trail_lock_loss ?? 0);
         const mfe = Number(trade.mfe_points || 0);
         const entry = Number(trade.entry_price);
         if (!Number.isFinite(entry) || !firstLock) return null;
@@ -1689,9 +1766,9 @@
                 <td class="num">${slCell(derivedTwoCandleTrailSl(trade), derivedTwoCandleTrailTime(trade))}</td>
                 <td class="num">${fmt(trade.exit_price)}</td>
                 <td><span class="reason">${exitLabel(trade.exit_reason)}</span></td>
-                <td class="num ${tone(trade.pnl_points)}"><b>${fmt(trade.pnl_points)}</b></td>
-                <td class="num">${fmt(trade.mfe_points)}</td>
-                <td class="num">${fmt(trade.mae_points)}</td>
+                <td class="num ${tone(trade.pnl_points)}"><b>${pointsPctCell(trade.pnl_points, trade.pnl_pct)}</b></td>
+                <td class="num">${pointsPctCell(trade.mfe_points, trade.mfe_pct)}</td>
+                <td class="num">${pointsPctCell(trade.mae_points, trade.mae_pct)}</td>
               </tr>
             `).join("")
           : `<tr><td class="empty" colspan="13">Run backtest to load records.</td></tr>`;
@@ -2352,9 +2429,11 @@
         }
       });
       document.getElementById("backtestForm").addEventListener("input", (event) => {
+        if (event.target.closest(".risk-control") && event.target.tagName === "SELECT") return;
         if (event.target.matches("input, select")) resizeSetupField(event.target);
       });
       document.getElementById("backtestForm").addEventListener("change", (event) => {
+        if (event.target.closest(".risk-control") && event.target.tagName === "SELECT") return;
         if (event.target.matches("input, select")) resizeSetupField(event.target);
       });
       document.getElementById("clearAllDataBtn").addEventListener("click", clearAllData);

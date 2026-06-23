@@ -31,7 +31,19 @@ if __package__ in {None, ""}:
     __package__ = "backtest"
 
 from .app_paths import CACHE_DIR, DATA_DIR, INSTANCE_DIR, REPORT_DATA_FILE, RESOURCE_DIR, RESULTS_DIR, prepare_runtime
-from .backtest_mt5 import BacktestConfig, TIMEFRAME_MINUTES, TIMEFRAMES, backtest, build_summary, clear_rates_cache, fetch_rates, parse_date, parse_time, write_outputs
+from .backtest_mt5 import (
+    BacktestConfig,
+    TIMEFRAME_MINUTES,
+    TIMEFRAMES,
+    backtest,
+    build_summary,
+    clear_rates_cache,
+    fetch_rates,
+    normalize_distance_unit,
+    parse_date,
+    parse_time,
+    write_outputs,
+)
 from .market_data import (
     SOURCES,
     SOURCE_TIMEFRAMES,
@@ -472,6 +484,12 @@ def optimizer_payload(data: dict) -> dict:
         "first_trail_lock_loss": scan_values(data, "first_trail_lock_values", [300.0, 400.0, 200.0], float),
         "second_trail_profit": scan_values(data, "second_trail_profit_values", [700.0], float),
     }
+    distance_units = {
+        "stop_points_unit": normalize_distance_unit(data.get("stop_points_unit", "POINTS")),
+        "first_trail_profit_unit": normalize_distance_unit(data.get("first_trail_profit_unit", "POINTS")),
+        "first_trail_lock_loss_unit": normalize_distance_unit(data.get("first_trail_lock_loss_unit", "POINTS")),
+        "second_trail_profit_unit": normalize_distance_unit(data.get("second_trail_profit_unit", "POINTS")),
+    }
     if any(value < 0 for values in parameters.values() for value in values):
         raise ValueError("Optimizer point and percentage settings must not be negative.")
     common = {
@@ -502,6 +520,7 @@ def optimizer_payload(data: dict) -> dict:
         "entry_patterns": entry_patterns,
         "time_profiles": time_profiles,
         "parameters": parameters,
+        "distance_units": distance_units,
         "target_win_rate": min(max(float(data.get("target_win_rate", 70)), 0), 100),
         "minimum_trades": max(int(data.get("minimum_trades", 20)), 1),
         "result_sort": str(data.get("result_sort", "BALANCED")).upper() if str(data.get("result_sort", "BALANCED")).upper() in OPTIMIZER_RESULT_SORTS else "BALANCED",
@@ -524,9 +543,13 @@ def optimization_row(config: BacktestConfig, stats: dict, qualified: bool, teste
         "session_end": config.session_end.strftime("%H:%M"),
         "entry_buffer_pct": round(float(config.entry_buffer_pct * 100), 6),
         "stop_points": float(config.stop_points),
+        "stop_points_unit": config.stop_points_unit,
         "first_trail_profit": float(config.first_trail_profit),
+        "first_trail_profit_unit": config.first_trail_profit_unit,
         "first_trail_lock_loss": float(config.first_trail_lock_loss),
+        "first_trail_lock_loss_unit": config.first_trail_lock_loss_unit,
         "second_trail_profit": float(config.second_trail_profit),
+        "second_trail_profit_unit": config.second_trail_profit_unit,
         "total_trades": int(stats["total_trades"]),
         "wins": int(stats["wins"]),
         "losses": int(stats["losses"]),
@@ -593,6 +616,7 @@ def optimizer_scan_config(payload: dict) -> dict:
         "trail_timeframes": payload["trail_timeframes"],
         "entry_patterns": payload["entry_patterns"],
         "parameters": payload["parameters"],
+        "distance_units": payload.get("distance_units", {}),
         "target_win_rate": payload["target_win_rate"],
         "minimum_trades": payload["minimum_trades"],
         "result_sort": payload.get("result_sort", "BALANCED"),
@@ -705,6 +729,7 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
     layouts = {}
     contexts = {}
     common = payload["common"]
+    distance_units = payload.get("distance_units", {})
     debug_enabled = str(payload.get("debug", "")).lower() in {"1", "true", "yes", "on"}
     m5_derived_timeframes = {"M5", "M10", "M15", "M30", "H1"}
     use_m5_derived_frames = (
@@ -931,7 +956,15 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                         for chunk_start in range(0, len(numeric_parameters), OPTIMIZER_CHECKPOINT_BATCH):
                             chunk_end = chunk_start + OPTIMIZER_CHECKPOINT_BATCH
                             chunk_parameters = parameters[chunk_start:chunk_end]
-                            stats_rows = evaluate_scan_batch(context, numeric_parameters[chunk_start:chunk_end], side_filter=side_filter)
+                            stats_rows = evaluate_scan_batch(
+                                context,
+                                numeric_parameters[chunk_start:chunk_end],
+                                side_filter=side_filter,
+                                stop_points_unit=distance_units.get("stop_points_unit", "POINTS"),
+                                first_trail_profit_unit=distance_units.get("first_trail_profit_unit", "POINTS"),
+                                first_trail_lock_loss_unit=distance_units.get("first_trail_lock_loss_unit", "POINTS"),
+                                second_trail_profit_unit=distance_units.get("second_trail_profit_unit", "POINTS"),
+                            )
                             chunk_rows = []
                             for values, stats in zip(chunk_parameters, stats_rows):
                                 tested += 1
@@ -946,6 +979,7 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                                     first_trail_profit=first_profit,
                                     first_trail_lock_loss=first_lock,
                                     second_trail_profit=second_profit,
+                                    **distance_units,
                                 )
                                 qualified = stats["total_trades"] >= payload["minimum_trades"] and stats["win_rate_pct"] >= payload["target_win_rate"]
                                 row = optimization_row(config, stats, qualified, tested, entry_pattern)
@@ -1158,9 +1192,13 @@ def defaults():
                 "session_end": "21:30",
                 "entry_buffer_pct": 0.02,
                 "stop_points": 10,
+                "stop_points_unit": "POINTS",
                 "first_trail_profit": 10,
+                "first_trail_profit_unit": "POINTS",
                 "first_trail_lock_loss": 0,
+                "first_trail_lock_loss_unit": "POINTS",
                 "second_trail_profit": 20,
+                "second_trail_profit_unit": "POINTS",
             },
         }
     )
@@ -1346,6 +1384,10 @@ def run_backtest():
             first_trail_profit=float(data.get("first_trail_profit", 400)),
             first_trail_lock_loss=float(data.get("first_trail_lock_loss", 300)),
             second_trail_profit=float(data.get("second_trail_profit", 700)),
+            stop_points_unit=data.get("stop_points_unit", "POINTS"),
+            first_trail_profit_unit=data.get("first_trail_profit_unit", "POINTS"),
+            first_trail_lock_loss_unit=data.get("first_trail_lock_loss_unit", "POINTS"),
+            second_trail_profit_unit=data.get("second_trail_profit_unit", "POINTS"),
         )
         if not config.symbol:
             raise ValueError("Symbol is required.")

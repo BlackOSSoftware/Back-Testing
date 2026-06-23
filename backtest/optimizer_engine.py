@@ -6,7 +6,7 @@ from datetime import time
 import numpy as np
 import pandas as pd
 
-from .backtest_mt5 import BacktestConfig, PRICE_EPSILON, TIMEFRAME_MINUTES
+from .backtest_mt5 import BacktestConfig, PRICE_EPSILON, TIMEFRAME_MINUTES, normalize_distance_unit
 
 try:
     from numba import njit, prange
@@ -39,6 +39,10 @@ class ScanContext:
     layout: EntryLayout
     trail_lows: np.ndarray
     trail_highs: np.ndarray
+
+
+def distance_unit_flag(unit: str | None) -> int:
+    return 1 if normalize_distance_unit(unit) == "PERCENT" else 0
 
 
 def minute_of_day(value: time) -> int:
@@ -366,6 +370,10 @@ def _evaluate_kernel(
     first_trail_profit,
     first_trail_lock_loss,
     second_trail_profit,
+    stop_points_unit,
+    first_trail_profit_unit,
+    first_trail_lock_loss_unit,
+    second_trail_profit_unit,
     side_filter,
 ):
     total = 0
@@ -405,7 +413,11 @@ def _evaluate_kernel(
         if side == 0:
             continue
         entry_price = buy_trigger if side == 1 else sell_trigger
-        stop = entry_price - stop_points if side == 1 else entry_price + stop_points
+        stop_distance = entry_price * stop_points / 100.0 if stop_points_unit == 1 else stop_points
+        first_profit_distance = entry_price * first_trail_profit / 100.0 if first_trail_profit_unit == 1 else first_trail_profit
+        first_lock_distance = entry_price * first_trail_lock_loss / 100.0 if first_trail_lock_loss_unit == 1 else first_trail_lock_loss
+        second_profit_distance = entry_price * second_trail_profit / 100.0 if second_trail_profit_unit == 1 else second_trail_profit
+        stop = entry_price - stop_distance if side == 1 else entry_price + stop_distance
         exit_price = closes[end - 1]
         second_trail_active = False
         for idx in range(entry_idx, end):
@@ -417,11 +429,11 @@ def _evaluate_kernel(
                 if lows[idx] <= stop + eps:
                     exit_price = stop
                     break
-                if highs[idx] + eps >= entry_price + first_trail_profit:
-                    candidate = entry_price + first_trail_lock_loss
+                if highs[idx] + eps >= entry_price + first_profit_distance:
+                    candidate = entry_price + first_lock_distance
                     if candidate > stop + eps:
                         stop = candidate
-                if highs[idx] + eps >= entry_price + second_trail_profit and not second_trail_active:
+                if highs[idx] + eps >= entry_price + second_profit_distance and not second_trail_active:
                     second_trail_active = True
                     candidate = trail_lows[idx]
                     if not np.isnan(candidate) and candidate > stop + eps:
@@ -434,11 +446,11 @@ def _evaluate_kernel(
                 if highs[idx] + eps >= stop:
                     exit_price = stop
                     break
-                if lows[idx] <= entry_price - first_trail_profit + eps:
-                    candidate = entry_price - first_trail_lock_loss
+                if lows[idx] <= entry_price - first_profit_distance + eps:
+                    candidate = entry_price - first_lock_distance
                     if candidate < stop - eps:
                         stop = candidate
-                if lows[idx] <= entry_price - second_trail_profit + eps and not second_trail_active:
+                if lows[idx] <= entry_price - second_profit_distance + eps and not second_trail_active:
                     second_trail_active = True
                     candidate = trail_highs[idx]
                     if not np.isnan(candidate) and candidate < stop - eps:
@@ -463,7 +475,19 @@ def _evaluate_kernel(
     return total, wins, losses, gross_profit, gross_loss, running, max_drawdown
 
 
-def evaluate_scan(context: ScanContext, entry_buffer_pct: float, stop_points: float, first_trail_profit: float, first_trail_lock_loss: float, second_trail_profit: float, side_filter: int = 0) -> dict:
+def evaluate_scan(
+    context: ScanContext,
+    entry_buffer_pct: float,
+    stop_points: float,
+    first_trail_profit: float,
+    first_trail_lock_loss: float,
+    second_trail_profit: float,
+    side_filter: int = 0,
+    stop_points_unit: str = "POINTS",
+    first_trail_profit_unit: str = "POINTS",
+    first_trail_lock_loss_unit: str = "POINTS",
+    second_trail_profit_unit: str = "POINTS",
+) -> dict:
     layout = context.layout
     total, wins, losses, gross_profit, gross_loss, net, max_drawdown = _evaluate_kernel(
         layout.day_starts,
@@ -483,6 +507,10 @@ def evaluate_scan(context: ScanContext, entry_buffer_pct: float, stop_points: fl
         first_trail_profit,
         first_trail_lock_loss,
         second_trail_profit,
+        distance_unit_flag(stop_points_unit),
+        distance_unit_flag(first_trail_profit_unit),
+        distance_unit_flag(first_trail_lock_loss_unit),
+        distance_unit_flag(second_trail_profit_unit),
         side_filter,
     )
     return {
@@ -511,6 +539,10 @@ def _evaluate_batch_kernel(
     trail_lows,
     trail_highs,
     parameters,
+    stop_points_unit,
+    first_trail_profit_unit,
+    first_trail_lock_loss_unit,
+    second_trail_profit_unit,
     side_filter,
 ):
     metrics = np.empty((len(parameters), 7), dtype=np.float64)
@@ -533,6 +565,10 @@ def _evaluate_batch_kernel(
             parameters[index, 2],
             parameters[index, 3],
             parameters[index, 4],
+            stop_points_unit,
+            first_trail_profit_unit,
+            first_trail_lock_loss_unit,
+            second_trail_profit_unit,
             side_filter,
         )
         metrics[index, 0] = metric[0]
@@ -545,13 +581,32 @@ def _evaluate_batch_kernel(
     return metrics
 
 
-def evaluate_scan_batch(context: ScanContext, parameters: list[tuple[float, float, float, float, float]], side_filter: int = 0) -> list[dict]:
+def evaluate_scan_batch(
+    context: ScanContext,
+    parameters: list[tuple[float, float, float, float, float]],
+    side_filter: int = 0,
+    stop_points_unit: str = "POINTS",
+    first_trail_profit_unit: str = "POINTS",
+    first_trail_lock_loss_unit: str = "POINTS",
+    second_trail_profit_unit: str = "POINTS",
+) -> list[dict]:
     if not parameters:
         return []
     layout = context.layout
     values = np.asarray(parameters, dtype=np.float64)
     if len(parameters) < 32:
-        return [evaluate_scan(context, *row, side_filter=side_filter) for row in parameters]
+        return [
+            evaluate_scan(
+                context,
+                *row,
+                side_filter=side_filter,
+                stop_points_unit=stop_points_unit,
+                first_trail_profit_unit=first_trail_profit_unit,
+                first_trail_lock_loss_unit=first_trail_lock_loss_unit,
+                second_trail_profit_unit=second_trail_profit_unit,
+            )
+            for row in parameters
+        ]
     kernel = _evaluate_batch_kernel
     metrics = kernel(
         layout.day_starts,
@@ -567,6 +622,10 @@ def evaluate_scan_batch(context: ScanContext, parameters: list[tuple[float, floa
         context.trail_lows,
         context.trail_highs,
         values,
+        distance_unit_flag(stop_points_unit),
+        distance_unit_flag(first_trail_profit_unit),
+        distance_unit_flag(first_trail_lock_loss_unit),
+        distance_unit_flag(second_trail_profit_unit),
         side_filter,
     )
     rows = []
@@ -585,7 +644,15 @@ def evaluate_scan_batch(context: ScanContext, parameters: list[tuple[float, floa
     return rows
 
 
-def evaluate_scan_batch_metrics(context: ScanContext, parameters: np.ndarray, side_filter: int = 0) -> np.ndarray:
+def evaluate_scan_batch_metrics(
+    context: ScanContext,
+    parameters: np.ndarray,
+    side_filter: int = 0,
+    stop_points_unit: str = "POINTS",
+    first_trail_profit_unit: str = "POINTS",
+    first_trail_lock_loss_unit: str = "POINTS",
+    second_trail_profit_unit: str = "POINTS",
+) -> np.ndarray:
     layout = context.layout
     if parameters.size == 0:
         return np.empty((0, 7), dtype=np.float64)
@@ -603,6 +670,10 @@ def evaluate_scan_batch_metrics(context: ScanContext, parameters: np.ndarray, si
         context.trail_lows,
         context.trail_highs,
         parameters,
+        distance_unit_flag(stop_points_unit),
+        distance_unit_flag(first_trail_profit_unit),
+        distance_unit_flag(first_trail_lock_loss_unit),
+        distance_unit_flag(second_trail_profit_unit),
         side_filter,
     )
 
@@ -623,5 +694,9 @@ def warm_optimizer_engine() -> None:
         np.asarray([99.0, 100.0], dtype=np.float64),
         np.asarray([102.0, 103.0], dtype=np.float64),
         params,
+        0,
+        0,
+        0,
+        0,
         0,
     )

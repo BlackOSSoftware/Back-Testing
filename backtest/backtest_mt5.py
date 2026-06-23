@@ -49,6 +49,28 @@ RATES_CACHE_SECONDS = 60.0
 MT5_FETCH_CHUNK_DAYS = max(int(os.getenv("BACKTEST_MT5_CHUNK_DAYS", "30")), 1)
 PRICE_EPSILON = 1e-9
 _rates_cache: dict[tuple[str, str, date, date], tuple[float, pd.DataFrame]] = {}
+RISK_DISTANCE_UNITS = {"POINTS", "PERCENT"}
+
+
+def normalize_distance_unit(value: str | None) -> str:
+    text = str(value or "POINTS").strip().upper()
+    if text in {"POINT", "POINTS", "PTS"}:
+        return "POINTS"
+    if text in {"PERCENT", "PERCENTAGE", "PCT", "%"}:
+        return "PERCENT"
+    raise ValueError("Risk distance unit must be POINTS or PERCENT.")
+
+
+def distance_to_points(value: float, unit: str, entry_price: float) -> float:
+    amount = float(value)
+    if normalize_distance_unit(unit) == "PERCENT":
+        return float(entry_price) * amount / 100
+    return amount
+
+
+def points_to_percent(points: float, entry_price: float) -> float:
+    entry = float(entry_price)
+    return (float(points) / entry) * 100 if entry else 0.0
 
 
 def clear_rates_cache() -> None:
@@ -74,8 +96,19 @@ class Trade:
     exit_price: float
     exit_reason: str
     pnl_points: float
+    pnl_pct: float
     mfe_points: float
+    mfe_pct: float
     mae_points: float
+    mae_pct: float
+    stop_distance_points: float
+    stop_distance_pct: float
+    first_trail_profit_points: float
+    first_trail_profit_pct: float
+    first_trail_lock_points: float
+    first_trail_lock_pct: float
+    second_trail_profit_points: float
+    second_trail_profit_pct: float
 
 
 @dataclass
@@ -97,8 +130,30 @@ class BacktestConfig:
     first_trail_profit: float = 400.0
     first_trail_lock_loss: float = 300.0
     second_trail_profit: float = 700.0
+    stop_points_unit: str = "POINTS"
+    first_trail_profit_unit: str = "POINTS"
+    first_trail_lock_loss_unit: str = "POINTS"
+    second_trail_profit_unit: str = "POINTS"
     data_from_date: date | None = None
     data_to_date: date | None = None
+
+    def __post_init__(self) -> None:
+        self.stop_points_unit = normalize_distance_unit(self.stop_points_unit)
+        self.first_trail_profit_unit = normalize_distance_unit(self.first_trail_profit_unit)
+        self.first_trail_lock_loss_unit = normalize_distance_unit(self.first_trail_lock_loss_unit)
+        self.second_trail_profit_unit = normalize_distance_unit(self.second_trail_profit_unit)
+
+    def stop_distance_points(self, entry_price: float) -> float:
+        return distance_to_points(self.stop_points, self.stop_points_unit, entry_price)
+
+    def first_trail_profit_points(self, entry_price: float) -> float:
+        return distance_to_points(self.first_trail_profit, self.first_trail_profit_unit, entry_price)
+
+    def first_trail_lock_points(self, entry_price: float) -> float:
+        return distance_to_points(self.first_trail_lock_loss, self.first_trail_lock_loss_unit, entry_price)
+
+    def second_trail_profit_points(self, entry_price: float) -> float:
+        return distance_to_points(self.second_trail_profit, self.second_trail_profit_unit, entry_price)
 
 
 def parse_date(value: str) -> date:
@@ -277,7 +332,11 @@ def manage_buy_trade(
     entry_price: float,
     config: BacktestConfig,
 ) -> tuple[str, float, str, float, float, str | None, float | None, str | None, float | None]:
-    stop = entry_price - config.stop_points
+    stop_distance = config.stop_distance_points(entry_price)
+    first_profit_distance = config.first_trail_profit_points(entry_price)
+    first_lock_distance = config.first_trail_lock_points(entry_price)
+    second_profit_distance = config.second_trail_profit_points(entry_price)
+    stop = entry_price - stop_distance
     stop_reason = "INITIAL_SL"
     first_trail_time = None
     first_trail_sl = None
@@ -308,15 +367,15 @@ def manage_buy_trade(
         if price_at_or_below(low, stop):
             return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
-        if price_at_or_above(high, entry_price + config.first_trail_profit):
-            first_trail_stop = entry_price + config.first_trail_lock_loss
+        if price_at_or_above(high, entry_price + first_profit_distance):
+            first_trail_stop = entry_price + first_lock_distance
             if higher_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
                 first_trail_time = candle_time.isoformat()
                 first_trail_sl = stop
 
-        if price_at_or_above(high, entry_price + config.second_trail_profit) and not second_trail_active:
+        if price_at_or_above(high, entry_price + second_profit_distance) and not second_trail_active:
             second_trail_active = True
             trail = current_and_previous_low(trail_candles, candle_time, config.trail_timeframe)
             if trail is not None and higher_stop(trail, stop):
@@ -339,7 +398,11 @@ def manage_sell_trade(
     entry_price: float,
     config: BacktestConfig,
 ) -> tuple[str, float, str, float, float, str | None, float | None, str | None, float | None]:
-    stop = entry_price + config.stop_points
+    stop_distance = config.stop_distance_points(entry_price)
+    first_profit_distance = config.first_trail_profit_points(entry_price)
+    first_lock_distance = config.first_trail_lock_points(entry_price)
+    second_profit_distance = config.second_trail_profit_points(entry_price)
+    stop = entry_price + stop_distance
     stop_reason = "INITIAL_SL"
     first_trail_time = None
     first_trail_sl = None
@@ -370,15 +433,15 @@ def manage_sell_trade(
         if price_at_or_above(high, stop):
             return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
-        if price_at_or_below(low, entry_price - config.first_trail_profit):
-            first_trail_stop = entry_price - config.first_trail_lock_loss
+        if price_at_or_below(low, entry_price - first_profit_distance):
+            first_trail_stop = entry_price - first_lock_distance
             if lower_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
                 first_trail_time = candle_time.isoformat()
                 first_trail_sl = stop
 
-        if price_at_or_below(low, entry_price - config.second_trail_profit) and not second_trail_active:
+        if price_at_or_below(low, entry_price - second_profit_distance) and not second_trail_active:
             second_trail_active = True
             trail = current_and_previous_high(trail_candles, candle_time, config.trail_timeframe)
             if trail is not None and lower_stop(trail, stop):
@@ -447,7 +510,11 @@ def backtest(
             execution_start_idx = int(execution_start_matches.idxmax())
 
             entry_price = buy_trigger if side == "BUY" else sell_trigger
-            initial_sl = entry_price - config.stop_points if side == "BUY" else entry_price + config.stop_points
+            stop_distance = config.stop_distance_points(entry_price)
+            first_profit_distance = config.first_trail_profit_points(entry_price)
+            first_lock_distance = config.first_trail_lock_points(entry_price)
+            second_profit_distance = config.second_trail_profit_points(entry_price)
+            initial_sl = entry_price - stop_distance if side == "BUY" else entry_price + stop_distance
 
             if side == "BUY":
                 exit_time, exit_price, reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl = manage_buy_trade(execution_session_df, trail_df, execution_start_idx, entry_price, config)
@@ -477,8 +544,19 @@ def backtest(
                     exit_price=round(exit_price, 2),
                     exit_reason=reason,
                     pnl_points=round(pnl, 2),
+                    pnl_pct=round(points_to_percent(pnl, entry_price), 4),
                     mfe_points=round(mfe, 2),
+                    mfe_pct=round(points_to_percent(mfe, entry_price), 4),
                     mae_points=round(mae, 2),
+                    mae_pct=round(points_to_percent(mae, entry_price), 4),
+                    stop_distance_points=round(stop_distance, 2),
+                    stop_distance_pct=round(points_to_percent(stop_distance, entry_price), 4),
+                    first_trail_profit_points=round(first_profit_distance, 2),
+                    first_trail_profit_pct=round(points_to_percent(first_profit_distance, entry_price), 4),
+                    first_trail_lock_points=round(first_lock_distance, 2),
+                    first_trail_lock_pct=round(points_to_percent(first_lock_distance, entry_price), 4),
+                    second_trail_profit_points=round(second_profit_distance, 2),
+                    second_trail_profit_pct=round(points_to_percent(second_profit_distance, entry_price), 4),
                 )
             )
             break
@@ -501,7 +579,11 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
     avg_win = gross_profit / len(wins) if wins else 0.0
     avg_loss = gross_loss / len(losses) if losses else 0.0
     exit_counts = {
-        "initial_sl_exits": sum(row["exit_reason"] in {"INITIAL_SL", "SL"} and row["pnl_points"] <= -config.stop_points for row in rows),
+        "initial_sl_exits": sum(
+            row["exit_reason"] in {"INITIAL_SL", "SL"}
+            and row["pnl_points"] <= -float(row.get("stop_distance_points", config.stop_points))
+            for row in rows
+        ),
         "first_trail_sl_exits": sum(row["exit_reason"] == "FIRST_TRAIL_SL" for row in rows),
         "two_candle_trail_sl_exits": sum(row["exit_reason"] == "TWO_CANDLE_TRAIL_SL" for row in rows),
         "force_exits": sum(row["exit_reason"] in {"FORCE_EXIT", "SESSION_CLOSE"} for row in rows),
@@ -543,9 +625,13 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
             "entry_pattern": config.entry_pattern.upper(),
             "entry_buffer_pct": config.entry_buffer_pct * 100,
             "stop_points": config.stop_points,
+            "stop_points_unit": config.stop_points_unit,
             "first_trail_profit": config.first_trail_profit,
+            "first_trail_profit_unit": config.first_trail_profit_unit,
             "first_trail_lock_loss": config.first_trail_lock_loss,
+            "first_trail_lock_loss_unit": config.first_trail_lock_loss_unit,
             "second_trail_profit": config.second_trail_profit,
+            "second_trail_profit_unit": config.second_trail_profit_unit,
         },
         "stats": {
             "total_trades": total,

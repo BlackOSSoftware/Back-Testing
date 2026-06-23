@@ -13,11 +13,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from backtest.backtest_mt5 import (  # noqa: E402
     BacktestConfig,
     IST,
+    backtest,
     current_and_previous_high,
+    manage_buy_trade,
     manage_sell_trade,
     price_at_or_above,
 )
-from backtest.optimizer_engine import EntryLayout, build_scan_context  # noqa: E402
+from backtest.optimizer_engine import EntryLayout, ScanContext, build_scan_context, evaluate_scan  # noqa: E402
 
 
 DAY = date(2026, 5, 15)
@@ -150,6 +152,108 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertFalse(price_at_or_above(4589.77, 4590.16))
         self.assertFalse(price_at_or_above(4590.11, 4590.16))
         self.assertTrue(price_at_or_above(4590.16 - 5e-10, 4590.16))
+
+    def test_buy_percent_trailing_distances_use_entry_price(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:00", 100.0, 111.0, 99.0, 110.0),
+                ("10:01", 110.0, 110.0, 101.5, 102.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            stop_points=20.0,
+            first_trail_profit=10.0,
+            first_trail_lock_loss=2.0,
+            second_trail_profit=50.0,
+            stop_points_unit="PERCENT",
+            first_trail_profit_unit="PERCENT",
+            first_trail_lock_loss_unit="PERCENT",
+            second_trail_profit_unit="PERCENT",
+            session_end=time(10, 2),
+        )
+
+        result = manage_buy_trade(execution, execution, 0, 100.0, config)
+
+        self.assertEqual(result[1], 102.0)
+        self.assertEqual(result[2], "FIRST_TRAIL_SL")
+        self.assertEqual(result[6], 102.0)
+
+    def test_backtest_rows_include_points_and_percent_distances(self) -> None:
+        frame = candle_frame(
+            [
+                ("08:30", 95.0, 100.0, 90.0, 95.0),
+                ("09:30", 100.0, 101.0, 95.0, 100.0),
+                ("09:31", 100.0, 100.0, 89.0, 90.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            timeframe="M1",
+            trail_timeframe="M1",
+            range_start=time(8, 30),
+            range_end=time(9, 30),
+            session_start=time(9, 30),
+            entry_cutoff=time(9, 30),
+            session_end=time(9, 31),
+            entry_buffer_pct=0.0,
+            stop_points=10.0,
+            stop_points_unit="PERCENT",
+            first_trail_profit=50.0,
+            first_trail_profit_unit="PERCENT",
+            first_trail_lock_loss=0.0,
+            second_trail_profit=80.0,
+            second_trail_profit_unit="PERCENT",
+        )
+
+        trades = backtest(frame, config, frame, frame)
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0].exit_price, 90.0)
+        self.assertEqual(trades[0].stop_distance_points, 10.0)
+        self.assertEqual(trades[0].stop_distance_pct, 10.0)
+        self.assertEqual(trades[0].pnl_points, -10.0)
+        self.assertEqual(trades[0].pnl_pct, -10.0)
+
+    def test_optimizer_percent_stop_is_converted_per_entry(self) -> None:
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([2], dtype=np.int64),
+            cutoff_ends=np.asarray([2], dtype=np.int64),
+            range_highs=np.asarray([200.0], dtype=np.float64),
+            range_lows=np.asarray([180.0], dtype=np.float64),
+            times_ns=np.asarray([candle_time("09:30").value, candle_time("09:31").value], dtype=np.int64),
+            opens=np.asarray([200.0, 200.0], dtype=np.float64),
+            highs=np.asarray([200.0, 201.0], dtype=np.float64),
+            lows=np.asarray([195.0, 179.0], dtype=np.float64),
+            closes=np.asarray([200.0, 180.0], dtype=np.float64),
+            at_session_end=np.asarray([False, True], dtype=np.bool_),
+        )
+        context = ScanContext(
+            layout=layout,
+            trail_lows=np.asarray([np.nan, np.nan], dtype=np.float64),
+            trail_highs=np.asarray([np.nan, np.nan], dtype=np.float64),
+        )
+
+        stats = evaluate_scan(
+            context,
+            0.0,
+            10.0,
+            50.0,
+            0.0,
+            80.0,
+            side_filter=1,
+            stop_points_unit="PERCENT",
+            first_trail_profit_unit="PERCENT",
+            second_trail_profit_unit="PERCENT",
+        )
+
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(stats["net_points"], -20.0)
 
 
 if __name__ == "__main__":

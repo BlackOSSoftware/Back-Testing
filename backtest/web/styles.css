@@ -643,6 +643,38 @@ select {
   width: 100%;
 }
 
+.form-grid > label:has(input[type="date"]) {
+  width: clamp(190px, calc((var(--field-ch, 14) * 1ch) + 76px), 240px);
+}
+
+.form-grid input[type="date"] {
+  min-width: 154px;
+}
+
+.form-grid > label:has(.risk-control) {
+  width: clamp(210px, calc((var(--field-ch, 18) * 1ch) + 100px), 390px);
+}
+
+.risk-control {
+  align-items: center;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) 76px;
+  width: 100%;
+}
+
+.risk-control input,
+.risk-control select {
+  min-width: 0;
+}
+
+.risk-control select {
+  font-size: 12px;
+  font-weight: 850;
+  padding-left: 8px;
+  padding-right: 24px;
+}
+
 .form-grid input:hover,
 .form-grid select:hover {
   border-color: #94a3b8;
@@ -1014,6 +1046,10 @@ select {
 
 .preset-btn:hover {
   background: #ecfdf5;
+}
+
+.optimizer-risk-control {
+  grid-template-columns: minmax(0, 1fr) 70px;
 }
 
 .optimizer-check {
@@ -1671,7 +1707,7 @@ select:focus {
 }
 
 .chart-shell {
-  height: 430px;
+  height: 300px;
   position: relative;
 }
 
@@ -2409,7 +2445,7 @@ td small {
   }
 
   .chart-shell {
-    height: 350px;
+    height: 280px;
   }
 }
 
@@ -2680,7 +2716,7 @@ td small {
   }
 
   .chart-shell {
-    height: 360px;
+    height: 280px;
   }
 
   #chartPanel .chart-controls {
@@ -2781,7 +2817,7 @@ td small {
   }
 
   .chart-shell {
-    height: 320px;
+    height: 260px;
   }
 
   .points-wrap {
