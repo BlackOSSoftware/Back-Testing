@@ -410,7 +410,11 @@ def scan_time_profiles(data: dict) -> list[dict]:
     range_starts = scan_values(data, "range_start_values", [data.get("range_start", "08:30")], parse_time, maximum=24)
     durations = scan_values(data, "range_duration_values", [60], int, maximum=6)
     session_ends = scan_values(data, "session_end_values", [data.get("session_end", "19:30")], parse_time, maximum=24)
-    entry_cutoff_values = scan_values(data, "entry_cutoff_values", [], parse_time, maximum=12) if str(data.get("entry_cutoff_values", "")).strip() else []
+    entry_cutoff_values = (
+        scan_values(data, "entry_cutoff_values", [], parse_time, maximum=12)
+        if str(data.get("entry_cutoff_values", "")).strip()
+        else [ensure_time(data.get("entry_cutoff", "18:00"))]
+    )
     profiles = []
     seen = set()
     rejected = {"range": 0, "session": 0, "entry": 0}
@@ -425,8 +429,7 @@ def scan_time_profiles(data: dict) -> list[dict]:
             range_end_abs = range_start_abs + duration
             session_start_abs = range_end_abs
             for session_end in session_ends:
-                cutoffs_for_end = entry_cutoff_values or [session_end]
-                for entry_cutoff in cutoffs_for_end:
+                for entry_cutoff in entry_cutoff_values:
                     raw_entry_cutoff_abs = minutes_after(range_start_abs, entry_cutoff)
                     session_end_abs = minutes_after(session_start_abs + 1, session_end)
                     if raw_entry_cutoff_abs < session_start_abs:
