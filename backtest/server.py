@@ -446,9 +446,9 @@ def scan_time_profiles(data: dict) -> list[dict]:
                         rejected["session"] += 1
                         first_hint = first_hint or f"Range start {range_start.strftime('%H:%M')} makes session start {session_start.strftime('%H:%M')}; Force Exit must be after this time."
                         continue
-                    if entry_cutoff_abs < session_start_abs or entry_cutoff_abs > session_end_abs:
+                    if entry_cutoff_abs < session_start_abs or entry_cutoff_abs >= session_end_abs:
                         rejected["entry"] += 1
-                        first_hint = first_hint or f"Range start {range_start.strftime('%H:%M')} makes session start {session_start.strftime('%H:%M')}; Last Entry must be between {session_start.strftime('%H:%M')} and {session_end.strftime('%H:%M')}."
+                        first_hint = first_hint or f"Range start {range_start.strftime('%H:%M')} makes session start {session_start.strftime('%H:%M')}; Last Entry must be after {session_start.strftime('%H:%M')} and before {session_end.strftime('%H:%M')}."
                         continue
                     key = (
                         range_start.strftime("%H:%M"),
@@ -626,11 +626,15 @@ def optimizer_metric_sort_keys(metrics: np.ndarray, minimum_trades: int, target_
 
 
 def optimizer_top_metric_indices(metrics: np.ndarray, minimum_trades: int, target_win_rate: float, mode: str, limit: int) -> np.ndarray:
-    if len(metrics) <= limit:
-        return np.arange(len(metrics))
-    keys = optimizer_metric_sort_keys(metrics, minimum_trades, target_win_rate, mode)
+    traded_indices = np.flatnonzero(metrics[:, 0] > 0)
+    if len(traded_indices) == 0:
+        return np.empty(0, dtype=np.int64)
+    if len(traded_indices) <= limit:
+        return traded_indices
+    traded_metrics = metrics[traded_indices]
+    keys = optimizer_metric_sort_keys(traded_metrics, minimum_trades, target_win_rate, mode)
     order = np.lexsort(tuple(-key for key in reversed(keys)))
-    return order[:limit]
+    return traded_indices[order[:limit]]
 
 
 def optimizer_qualified_mask(metrics: np.ndarray, minimum_trades: int, target_win_rate: float) -> np.ndarray:

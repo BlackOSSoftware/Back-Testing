@@ -256,7 +256,7 @@
               </label>
               <label class="optimizer-time-picker">
                 <span>Force Exit Values <button class="info-btn" type="button" title="Agar trade is time tak open hai to software usko close kar dega.">?</button></span>
-                <input id="optimizerSessionEnds" name="session_end_values" type="hidden" value="19:30" />
+                <input id="optimizerSessionEnds" name="session_end_values" type="hidden" value="21:30" />
                 <div id="optimizerSessionEndPicker" class="value-picker"></div>
                 <button id="optimizerSessionEnd24Btn" class="preset-btn" type="button">24h</button>
                 <div class="value-add-row">
@@ -927,11 +927,15 @@
       }
 
       function fillOptimizerTimeframes() {
-          const source = document.getElementById("dataSourceInput").value || "DELTA";
+        const source = document.getElementById("dataSourceInput").value || "DELTA";
         const timeframes = sourceTimeframes[source] || sourceTimeframes.MT5;
         const scanDefaults = ["M5", "M10", "M15", "M30", "H1"];
         const entryDefaults = scanDefaults.filter((item) => timeframes.includes(item));
         const trailDefaults = scanDefaults.filter((item) => timeframes.includes(item));
+        const setupEntryCutoff = document.querySelector('#backtestForm [name="entry_cutoff"]')?.value || "19:00";
+        const setupSessionEnd = document.querySelector('#backtestForm [name="session_end"]')?.value || "21:30";
+        const optimizerCutoffOptions = Array.from(new Set(["15:00", "16:00", "17:00", "18:00", setupEntryCutoff])).sort();
+        const optimizerExitOptions = Array.from(new Set(["18:00", "18:30", "19:00", "19:30", "20:00", setupSessionEnd])).sort();
         renderValuePicker("optimizerEntryTimeframePicker", "optimizerEntryTimeframes", timeframes, entryDefaults);
         renderValuePicker("optimizerTrailTimeframePicker", "optimizerTrailTimeframes", timeframes, trailDefaults);
         renderValuePicker(
@@ -949,15 +953,15 @@
         renderValuePicker(
           "optimizerEntryCutoffPicker",
           "optimizerEntryCutoffs",
-          ["15:00", "16:00", "17:00", "18:00"],
+          optimizerCutoffOptions,
           [],
           { allowEmpty: true }
         );
         renderValuePicker(
           "optimizerSessionEndPicker",
           "optimizerSessionEnds",
-          ["18:00", "18:30", "19:00", "19:30", "20:00"],
-          ["18:00", "18:30", "19:00", "19:30", "20:00"]
+          optimizerExitOptions,
+          [setupSessionEnd]
         );
       }
 
@@ -2610,6 +2614,8 @@
       document.getElementById("timeframeInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("trailTimeframeInput").addEventListener("change", loadHistoryInfo);
       document.querySelector('[name="second_trail_profit"]').addEventListener("change", loadHistoryInfo);
+      document.querySelector('[name="entry_cutoff"]').addEventListener("change", fillOptimizerTimeframes);
+      document.querySelector('[name="session_end"]').addEventListener("change", fillOptimizerTimeframes);
       document.getElementById("fromDateInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("toDateInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("symbolInput").addEventListener("change", loadHistoryInfo);
