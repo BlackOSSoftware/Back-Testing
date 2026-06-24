@@ -7,10 +7,10 @@ import os
 import re
 import secrets
 import shutil
+import sqlite3
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from datetime import date, datetime, time, timedelta, timezone
-from dataclasses import replace
 from functools import wraps
 from io import BytesIO, StringIO
 from itertools import product
@@ -54,7 +54,7 @@ from .market_data import (
     normalize_source,
     validate_source_timeframe,
 )
-from .optimizer_engine import ScanContext, build_entry_layout, build_execution_layout, build_scan_context, evaluate_scan_batch_metrics, warm_optimizer_engine
+from .optimizer_engine import build_entry_layout, build_execution_layout, build_scan_context, evaluate_scan_batch_metrics, warm_optimizer_engine
 
 
 prepare_runtime()
@@ -111,10 +111,13 @@ OPTIMIZER_PROGRESS_EVERY = optimizer_int_env("OPTIMIZER_PROGRESS_EVERY", 25000, 
 OPTIMIZER_CHECKPOINT_EVERY = max(optimizer_int_env("OPTIMIZER_CHECKPOINT_EVERY", 250000, 1000), OPTIMIZER_PROGRESS_EVERY)
 OPTIMIZER_SAVE_FULL_CSV_DEFAULT = os.getenv("OPTIMIZER_SAVE_FULL_CSV", "").lower() in {"1", "true", "yes", "on"}
 OPTIMIZER_RUNS_DIR = RESULTS_DIR / "optimizer_runs"
+OPTIMIZER_DB_FILE = OPTIMIZER_RUNS_DIR / "optimizer.sqlite3"
+OPTIMIZER_ENGINE_VERSION = 3
 _optimizer_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="optimizer")
 _optimizer_warmup_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="optimizer-warmup")
 _optimizer_jobs: dict[str, dict] = {}
 _optimizer_lock = Lock()
+_optimizer_db_lock = Lock()
 _saved_data_lock = Lock()
 _optimizer_warmup_executor.submit(warm_optimizer_engine)
 OPTIMIZER_ENTRY_PATTERNS = {
@@ -746,9 +749,381 @@ def optimizer_csv_path(source: str, symbol: str, scan_id: str) -> Path:
     return optimizer_scan_dir(source, symbol, scan_id) / "results.csv"
 
 
+def optimizer_db_connection() -> sqlite3.Connection:
+    OPTIMIZER_DB_FILE.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(OPTIMIZER_DB_FILE, timeout=30.0)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute("PRAGMA temp_store=MEMORY")
+    connection.execute("PRAGMA foreign_keys=ON")
+    connection.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS optimizer_scans (
+            source TEXT NOT NULL,
+            symbol_key TEXT NOT NULL,
+            symbol TEXT NOT NULL,
+            scan_id TEXT NOT NULL,
+            engine_version INTEGER NOT NULL,
+            status TEXT NOT NULL,
+            message TEXT,
+            created_at TEXT,
+            updated_at TEXT,
+            tested INTEGER NOT NULL DEFAULT 0,
+            total INTEGER NOT NULL DEFAULT 0,
+            progress_pct REAL NOT NULL DEFAULT 0,
+            target_win_rate REAL NOT NULL DEFAULT 0,
+            minimum_trades INTEGER NOT NULL DEFAULT 1,
+            result_sort TEXT NOT NULL DEFAULT 'BALANCED',
+            save_full_csv INTEGER NOT NULL DEFAULT 0,
+            result_count INTEGER NOT NULL DEFAULT 0,
+            results_truncated INTEGER NOT NULL DEFAULT 0,
+            target_found INTEGER NOT NULL DEFAULT 0,
+            stopped_early INTEGER NOT NULL DEFAULT 0,
+            best_win_rate REAL,
+            elapsed_seconds REAL,
+            scan_config TEXT NOT NULL,
+            PRIMARY KEY (source, symbol_key, scan_id)
+        );
+        CREATE TABLE IF NOT EXISTS optimizer_results (
+            source TEXT NOT NULL,
+            symbol_key TEXT NOT NULL,
+            scan_id TEXT NOT NULL,
+            rank INTEGER NOT NULL,
+            qualified INTEGER NOT NULL DEFAULT 0,
+            entry_pattern TEXT,
+            timeframe TEXT,
+            trail_timeframe TEXT,
+            range_start TEXT,
+            range_end TEXT,
+            session_start TEXT,
+            entry_cutoff TEXT,
+            session_end TEXT,
+            entry_buffer_pct REAL,
+            stop_points REAL,
+            stop_points_unit TEXT,
+            first_trail_profit REAL,
+            first_trail_profit_unit TEXT,
+            first_trail_lock_loss REAL,
+            first_trail_lock_loss_unit TEXT,
+            second_trail_profit REAL,
+            second_trail_profit_unit TEXT,
+            total_trades INTEGER,
+            wins INTEGER,
+            losses INTEGER,
+            win_rate_pct REAL,
+            net_points REAL,
+            profit_factor REAL,
+            max_drawdown_points REAL,
+            PRIMARY KEY (source, symbol_key, scan_id, rank),
+            FOREIGN KEY (source, symbol_key, scan_id)
+                REFERENCES optimizer_scans(source, symbol_key, scan_id)
+                ON DELETE CASCADE
+        );
+        CREATE INDEX IF NOT EXISTS idx_optimizer_scans_lookup
+            ON optimizer_scans(source, symbol_key, created_at DESC);
+        """
+    )
+    return connection
+
+
+def optimizer_symbol_key(symbol: str) -> str:
+    return safe_optimizer_part(symbol)
+
+
+def db_int(value, default: int = 0) -> int:
+    if value is None or value == "":
+        return default
+    return int(value)
+
+
+def db_float(value, default: float | None = 0.0) -> float | None:
+    if value is None or value == "":
+        return default
+    return float(value)
+
+
+def db_bool(value) -> int:
+    return 1 if bool(value) else 0
+
+
+def scan_from_db_row(row: sqlite3.Row, results: list[dict] | None = None) -> dict:
+    scan_config = json.loads(row["scan_config"])
+    record = {
+        "scan_id": row["scan_id"],
+        "source": row["source"],
+        "symbol": row["symbol"],
+        "status": row["status"],
+        "message": row["message"] or "",
+        "created_at": row["created_at"],
+        "updated_at": row["updated_at"],
+        "tested": int(row["tested"] or 0),
+        "total": int(row["total"] or 0),
+        "progress_pct": float(row["progress_pct"] or 0),
+        "target_win_rate": float(row["target_win_rate"] or 0),
+        "minimum_trades": int(row["minimum_trades"] or 1),
+        "result_sort": row["result_sort"] or "BALANCED",
+        "save_full_csv": bool(row["save_full_csv"]),
+        "result_count": int(row["result_count"] or 0),
+        "results_truncated": bool(row["results_truncated"]),
+        "target_found": bool(row["target_found"]),
+        "stopped_early": bool(row["stopped_early"]),
+        "scan_config": scan_config,
+        "results": results or [],
+    }
+    if row["best_win_rate"] is not None:
+        record["best_win_rate"] = float(row["best_win_rate"])
+    if row["elapsed_seconds"] is not None:
+        record["elapsed_seconds"] = float(row["elapsed_seconds"])
+    return record
+
+
+def optimizer_result_from_db_row(row: sqlite3.Row) -> dict:
+    return {
+        "rank": int(row["rank"]),
+        "qualified": bool(row["qualified"]),
+        "entry_pattern": row["entry_pattern"],
+        "timeframe": row["timeframe"],
+        "trail_timeframe": row["trail_timeframe"],
+        "range_start": row["range_start"],
+        "range_end": row["range_end"],
+        "session_start": row["session_start"],
+        "entry_cutoff": row["entry_cutoff"],
+        "session_end": row["session_end"],
+        "entry_buffer_pct": db_float(row["entry_buffer_pct"]),
+        "stop_points": db_float(row["stop_points"]),
+        "stop_points_unit": row["stop_points_unit"],
+        "first_trail_profit": db_float(row["first_trail_profit"]),
+        "first_trail_profit_unit": row["first_trail_profit_unit"],
+        "first_trail_lock_loss": db_float(row["first_trail_lock_loss"]),
+        "first_trail_lock_loss_unit": row["first_trail_lock_loss_unit"],
+        "second_trail_profit": db_float(row["second_trail_profit"]),
+        "second_trail_profit_unit": row["second_trail_profit_unit"],
+        "total_trades": db_int(row["total_trades"]),
+        "wins": db_int(row["wins"]),
+        "losses": db_int(row["losses"]),
+        "win_rate_pct": db_float(row["win_rate_pct"]),
+        "net_points": db_float(row["net_points"]),
+        "profit_factor": db_float(row["profit_factor"], None),
+        "max_drawdown_points": db_float(row["max_drawdown_points"]),
+    }
+
+
+def save_optimizer_scan_db(scan: dict) -> None:
+    config = scan.get("scan_config", {})
+    source = normalize_source(scan.get("source") or config.get("data_source", "DELTA"))
+    symbol = str(scan.get("symbol") or config.get("symbol", "")).strip()
+    symbol_key = optimizer_symbol_key(symbol)
+    results = scan.get("results") or []
+    with _optimizer_db_lock:
+        connection = optimizer_db_connection()
+        try:
+            with connection:
+                connection.execute(
+                    """
+                    INSERT INTO optimizer_scans (
+                        source, symbol_key, symbol, scan_id, engine_version, status, message,
+                        created_at, updated_at, tested, total, progress_pct, target_win_rate,
+                        minimum_trades, result_sort, save_full_csv, result_count,
+                        results_truncated, target_found, stopped_early, best_win_rate,
+                        elapsed_seconds, scan_config
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(source, symbol_key, scan_id) DO UPDATE SET
+                        symbol=excluded.symbol,
+                        engine_version=excluded.engine_version,
+                        status=excluded.status,
+                        message=excluded.message,
+                        created_at=excluded.created_at,
+                        updated_at=excluded.updated_at,
+                        tested=excluded.tested,
+                        total=excluded.total,
+                        progress_pct=excluded.progress_pct,
+                        target_win_rate=excluded.target_win_rate,
+                        minimum_trades=excluded.minimum_trades,
+                        result_sort=excluded.result_sort,
+                        save_full_csv=excluded.save_full_csv,
+                        result_count=excluded.result_count,
+                        results_truncated=excluded.results_truncated,
+                        target_found=excluded.target_found,
+                        stopped_early=excluded.stopped_early,
+                        best_win_rate=excluded.best_win_rate,
+                        elapsed_seconds=excluded.elapsed_seconds,
+                        scan_config=excluded.scan_config
+                    """,
+                    (
+                        source,
+                        symbol_key,
+                        symbol,
+                        scan["scan_id"],
+                        int(config.get("engine_version", OPTIMIZER_ENGINE_VERSION)),
+                        scan.get("status", "queued"),
+                        scan.get("message", ""),
+                        scan.get("created_at"),
+                        scan.get("updated_at"),
+                        db_int(scan.get("tested")),
+                        db_int(scan.get("total")),
+                        db_float(scan.get("progress_pct")),
+                        db_float(scan.get("target_win_rate")),
+                        db_int(scan.get("minimum_trades"), 1),
+                        scan.get("result_sort", "BALANCED"),
+                        db_bool(scan.get("save_full_csv")),
+                        db_int(scan.get("result_count")),
+                        db_bool(scan.get("results_truncated")),
+                        db_bool(scan.get("target_found")),
+                        db_bool(scan.get("stopped_early")),
+                        db_float(scan.get("best_win_rate"), None),
+                        db_float(scan.get("elapsed_seconds"), None),
+                        json.dumps(config, separators=(",", ":")),
+                    ),
+                )
+                connection.execute(
+                    "DELETE FROM optimizer_results WHERE source = ? AND symbol_key = ? AND scan_id = ?",
+                    (source, symbol_key, scan["scan_id"]),
+                )
+                connection.executemany(
+                    """
+                    INSERT INTO optimizer_results (
+                        source, symbol_key, scan_id, rank, qualified, entry_pattern, timeframe,
+                        trail_timeframe, range_start, range_end, session_start, entry_cutoff,
+                        session_end, entry_buffer_pct, stop_points, stop_points_unit,
+                        first_trail_profit, first_trail_profit_unit, first_trail_lock_loss,
+                        first_trail_lock_loss_unit, second_trail_profit, second_trail_profit_unit,
+                        total_trades, wins, losses, win_rate_pct, net_points, profit_factor,
+                        max_drawdown_points
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    [
+                        (
+                            source,
+                            symbol_key,
+                            scan["scan_id"],
+                            db_int(row.get("rank"), index),
+                            db_bool(row.get("qualified")),
+                            row.get("entry_pattern"),
+                            row.get("timeframe"),
+                            row.get("trail_timeframe"),
+                            row.get("range_start"),
+                            row.get("range_end"),
+                            row.get("session_start"),
+                            row.get("entry_cutoff"),
+                            row.get("session_end"),
+                            db_float(row.get("entry_buffer_pct")),
+                            db_float(row.get("stop_points")),
+                            row.get("stop_points_unit"),
+                            db_float(row.get("first_trail_profit")),
+                            row.get("first_trail_profit_unit"),
+                            db_float(row.get("first_trail_lock_loss")),
+                            row.get("first_trail_lock_loss_unit"),
+                            db_float(row.get("second_trail_profit")),
+                            row.get("second_trail_profit_unit"),
+                            db_int(row.get("total_trades")),
+                            db_int(row.get("wins")),
+                            db_int(row.get("losses")),
+                            db_float(row.get("win_rate_pct")),
+                            db_float(row.get("net_points")),
+                            db_float(row.get("profit_factor"), None),
+                            db_float(row.get("max_drawdown_points")),
+                        )
+                        for index, row in enumerate(results, start=1)
+                    ],
+                )
+        finally:
+            connection.close()
+
+
+def optimizer_results_from_db(connection: sqlite3.Connection, source: str, symbol_key: str, scan_id: str) -> list[dict]:
+    rows = connection.execute(
+        """
+        SELECT * FROM optimizer_results
+        WHERE source = ? AND symbol_key = ? AND scan_id = ?
+        ORDER BY rank ASC
+        """,
+        (source, symbol_key, scan_id),
+    ).fetchall()
+    return [optimizer_result_from_db_row(row) for row in rows]
+
+
+def load_optimizer_scan_db(source: str, symbol: str, scan_id: str) -> dict | None:
+    source = normalize_source(source)
+    symbol_key = optimizer_symbol_key(symbol)
+    connection = optimizer_db_connection()
+    try:
+        row = connection.execute(
+            """
+            SELECT * FROM optimizer_scans
+            WHERE source = ? AND symbol_key = ? AND scan_id = ? AND engine_version = ?
+            """,
+            (source, symbol_key, scan_id, OPTIMIZER_ENGINE_VERSION),
+        ).fetchone()
+        if row is None:
+            return None
+        results = optimizer_results_from_db(connection, source, symbol_key, scan_id)
+        return scan_from_db_row(row, results)
+    finally:
+        connection.close()
+
+
+def saved_optimizer_scans_db(source: str, symbol: str, include_results: bool = True) -> list[dict]:
+    source = normalize_source(source)
+    symbol_key = optimizer_symbol_key(symbol)
+    connection = optimizer_db_connection()
+    try:
+        rows = connection.execute(
+            """
+            SELECT * FROM optimizer_scans
+            WHERE source = ? AND symbol_key = ? AND engine_version = ?
+            ORDER BY created_at DESC
+            LIMIT 50
+            """,
+            (source, symbol_key, OPTIMIZER_ENGINE_VERSION),
+        ).fetchall()
+        records = []
+        for row in rows:
+            results = optimizer_results_from_db(connection, source, symbol_key, row["scan_id"]) if include_results else []
+            records.append(scan_from_db_row(row, results))
+        return records
+    finally:
+        connection.close()
+
+
+def legacy_saved_optimizer_scans(source: str, symbol: str, include_results: bool = True) -> list[dict]:
+    directory = OPTIMIZER_RUNS_DIR / normalize_source(source).lower() / safe_optimizer_part(symbol)
+    if not directory.exists():
+        return []
+    records = []
+    for path in directory.glob("*/scan.json"):
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            if int(data.get("scan_config", {}).get("engine_version", 0)) != OPTIMIZER_ENGINE_VERSION:
+                continue
+            if not include_results:
+                data["results"] = []
+            records.append(data)
+        except (OSError, json.JSONDecodeError):
+            continue
+    return records
+
+
+def load_legacy_optimizer_scan(source: str, symbol: str, scan_id: str) -> dict | None:
+    path = optimizer_output_path(source, symbol, scan_id)
+    if not path.exists():
+        return None
+    result = json.loads(path.read_text(encoding="utf-8"))
+    if int(result.get("scan_config", {}).get("engine_version", 0)) != OPTIMIZER_ENGINE_VERSION:
+        raise ValueError("This optimizer scan was created by an older engine. Run a fresh scan.")
+    return result
+
+
+def load_saved_optimizer_scan(source: str, symbol: str, scan_id: str) -> dict | None:
+    return load_optimizer_scan_db(source, symbol, scan_id) or load_legacy_optimizer_scan(source, symbol, scan_id)
+
+
 def optimizer_scan_config(payload: dict) -> dict:
     common = payload["common"]
     return {
+        "engine_version": OPTIMIZER_ENGINE_VERSION,
         "symbol": common["symbol"],
         "data_source": common["data_source"],
         "from_date": common["from_date"].isoformat(),
@@ -813,13 +1188,10 @@ def save_optimizer_output(
         stored["result_count"] = total_result_count
         stored["results_truncated"] = total_result_count > OPTIMIZER_VISIBLE_RESULTS
     stored["scan_config"] = optimizer_scan_config(payload)
-    path = optimizer_output_path(common["data_source"], common["symbol"], job["scan_id"])
-    path.parent.mkdir(parents=True, exist_ok=True)
-    json_temp = path.with_suffix(".tmp")
-    json_temp.write_text(json.dumps(stored, indent=2), encoding="utf-8")
-    json_temp.replace(path)
+    save_optimizer_scan_db(stored)
     csv_path = optimizer_csv_path(common["data_source"], common["symbol"], job["scan_id"])
     if csv_rows:
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
         if replace_csv:
             csv_temp = csv_path.with_suffix(".tmp")
             handle = csv_temp.open("w", newline="", encoding="utf-8")
@@ -827,7 +1199,7 @@ def save_optimizer_output(
             csv_temp = None
             handle = csv_path.open("a", newline="", encoding="utf-8")
         with handle:
-            writer = csv.DictWriter(handle, fieldnames=list(rows[0].keys()))
+            writer = csv.DictWriter(handle, fieldnames=list(csv_rows[0].keys()))
             if replace_csv or not csv_path.exists() or csv_path.stat().st_size == 0:
                 writer.writeheader()
             writer.writerows(csv_rows)
@@ -836,17 +1208,11 @@ def save_optimizer_output(
     return stored
 
 
-def saved_optimizer_scans(source: str, symbol: str) -> list[dict]:
-    directory = OPTIMIZER_RUNS_DIR / normalize_source(source).lower() / safe_optimizer_part(symbol)
-    if not directory.exists():
-        return []
-    records = []
-    for path in directory.glob("*/scan.json"):
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-            records.append(data)
-        except (OSError, json.JSONDecodeError):
-            continue
+def saved_optimizer_scans(source: str, symbol: str, include_results: bool = True) -> list[dict]:
+    records_by_scan_id = {row["scan_id"]: row for row in saved_optimizer_scans_db(source, symbol, include_results)}
+    for row in legacy_saved_optimizer_scans(source, symbol, include_results):
+        records_by_scan_id.setdefault(row["scan_id"], row)
+    records = list(records_by_scan_id.values())
     records.sort(key=lambda item: item.get("created_at", ""), reverse=True)
     return records
 
@@ -1003,6 +1369,21 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                 debug_progress(f"DEBUG ready {timeframe}{' padded' if padded else ''}: {len(frames[key])} rows")
         return frames[key]
 
+    def execution_frame(padded: bool):
+        key = ("M1_EXECUTION", padded)
+        if key not in frames:
+            frame_config = BacktestConfig(
+                symbol=common["symbol"],
+                from_date=common["from_date"] - timedelta(days=1) if padded else common["from_date"],
+                to_date=common["to_date"] + timedelta(days=1) if has_overnight_windows else common["to_date"],
+                data_source=common["data_source"],
+                timeframe="M1",
+            )
+            debug_progress(f"DEBUG fetch M1 execution candles: {frame_config.from_date} to {frame_config.to_date}")
+            frames[key] = fetch_source_rates(frame_config)
+            debug_progress(f"DEBUG ready M1 execution candles: {len(frames[key])} rows")
+        return frames[key]
+
     def time_profile_key(profile: dict) -> tuple[str, str, str, str, str]:
         return (
             profile["range_start"].strftime("%H:%M"),
@@ -1012,33 +1393,13 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
             profile["session_end"].strftime("%H:%M"),
         )
 
-    def session_profile_key(profile: dict) -> tuple[str, str, str, str]:
-        return (
-            profile["range_start"].strftime("%H:%M"),
-            profile["range_end"].strftime("%H:%M"),
-            profile["session_start"].strftime("%H:%M"),
-            profile["session_end"].strftime("%H:%M"),
-        )
-
-    def cutoff_ends_for_layout(layout, cutoff: time):
-        cutoff_minute = cutoff.hour * 60 + cutoff.minute
-        local_minutes = ((((layout.times_ns // 1_000_000_000) + 19800) % 86400) // 60).astype("int64")
-        return np.asarray(
-            [
-                int(start + np.count_nonzero(local_minutes[start:end] <= cutoff_minute))
-                for start, end in zip(layout.day_starts, layout.day_ends)
-            ],
-            dtype=np.int64,
-        )
-
     def scan_context(entry_timeframe: str, trail_timeframe: str, profile: dict):
         profile["range_start"] = ensure_time(profile["range_start"])
         profile["range_end"] = ensure_time(profile["range_end"])
         profile["session_start"] = ensure_time(profile["session_start"])
         profile["entry_cutoff"] = ensure_time(profile["entry_cutoff"])
         profile["session_end"] = ensure_time(profile["session_end"])
-        overnight_profile = profile["session_end"] <= profile["session_start"] or profile["entry_cutoff"] < profile["session_start"]
-        base_profile_key = time_profile_key(profile) if overnight_profile else session_profile_key(profile)
+        base_profile_key = time_profile_key(profile)
         pair_key = (entry_timeframe, trail_timeframe, base_profile_key)
         if pair_key not in contexts:
             entry_df = candle_frame(entry_timeframe, False)
@@ -1050,10 +1411,10 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                         status="running",
                         message=f"Preparing layouts... {len(layouts)} built, {len(contexts)} contexts ready",
                     )
-                if use_m5_derived_frames:
-                    layouts[layout_key] = build_execution_layout(entry_df, candle_frame("M5", False), layout_config)
-                else:
+                if entry_timeframe == "M1":
                     layouts[layout_key] = build_entry_layout(entry_df, layout_config)
+                else:
+                    layouts[layout_key] = build_execution_layout(entry_df, execution_frame(False), layout_config)
             trail_df = entry_df if trail_timeframe == entry_timeframe else candle_frame(trail_timeframe, True)
             if len(contexts) % 50 == 0:
                 update_progress(
@@ -1061,11 +1422,7 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                     message=f"Preparing trail contexts... {len(contexts)} ready",
                 )
             contexts[pair_key] = build_scan_context(layouts[layout_key], trail_df, trail_timeframe)
-        base_context = contexts[pair_key]
-        if overnight_profile:
-            return base_context
-        adjusted_layout = replace(base_context.layout, cutoff_ends=cutoff_ends_for_layout(base_context.layout, profile["entry_cutoff"]))
-        return ScanContext(layout=adjusted_layout, trail_lows=base_context.trail_lows, trail_highs=base_context.trail_highs)
+        return contexts[pair_key]
 
     try:
         update_progress(
@@ -1686,7 +2043,7 @@ def optimizer_scans():
         symbol = request.args.get("symbol", "").strip()
         if not symbol:
             raise ValueError("Symbol is required.")
-        records = saved_optimizer_scans(source, symbol)
+        records = saved_optimizer_scans(source, symbol, include_results=False)
         summary = [public_saved_optimizer_scan(row) for row in records[:50]]
         return jsonify(summary)
     except Exception as exc:
@@ -1701,16 +2058,17 @@ def saved_optimizer_scan(scan_id: str):
         symbol = request.args.get("symbol", "").strip()
         if not symbol:
             raise ValueError("Symbol is required.")
-        path = optimizer_output_path(source, symbol, scan_id)
-        if not path.exists():
+        result = load_saved_optimizer_scan(source, symbol, scan_id)
+        if result is None:
             return jsonify({"error": "Optimizer scan not found."}), 404
-        result = json.loads(path.read_text(encoding="utf-8"))
         with _optimizer_lock:
             active = scan_id in _optimizer_jobs
         if result.get("status") in {"queued", "running"} and not active:
             result["status"] = "interrupted"
             result["message"] = "Scan was interrupted. Saved partial results are available."
         return jsonify(result)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 
@@ -1747,10 +2105,9 @@ def export_optimizer():
             scan_id = scans[0]["scan_id"]
         path = optimizer_csv_path(source, symbol, scan_id)
         if not path.exists():
-            scan_path = optimizer_output_path(source, symbol, scan_id)
-            if not scan_path.exists():
+            scan = load_saved_optimizer_scan(source, symbol, scan_id)
+            if scan is None:
                 return jsonify({"error": "No optimizer scan result found."}), 404
-            scan = json.loads(scan_path.read_text(encoding="utf-8"))
             rows = scan.get("results") or []
             if not rows:
                 return jsonify({"error": "No optimizer scan result found."}), 404
@@ -1763,6 +2120,8 @@ def export_optimizer():
             return send_file(bytes_buffer, mimetype="text/csv", as_attachment=True, download_name=filename)
         filename = f"{safe_optimizer_part(symbol).lower()}_{source.lower()}_{scan_id}_optimizer.csv"
         return send_file(path, as_attachment=True, download_name=filename)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 409
     except Exception as exc:
         return jsonify({"error": str(exc)}), 400
 

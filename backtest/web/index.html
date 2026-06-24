@@ -213,6 +213,17 @@
             <span id="optimizerStatusPill" class="status-pill">Ready</span>
           </div>
           <form id="optimizerForm" class="optimizer-grid">
+            <label class="optimizer-market-label">
+              <span class="setup-label tone-blue"><i data-lucide="database"></i>Data Source</span>
+              <select id="optimizerDataSourceInput" name="data_source"></select>
+            </label>
+            <label class="optimizer-market-label">
+              <span class="setup-label tone-green"><i data-lucide="search"></i>Script / Symbol</span>
+              <div class="symbol-combo">
+                <input id="optimizerSymbolInput" name="symbol" autocomplete="off" placeholder="Search symbol..." required />
+                <div id="optimizerSymbolMenu" class="symbol-menu"></div>
+              </div>
+            </label>
             <label class="optimizer-picker-label">
               <span>Entry Timeframes</span>
               <input id="optimizerEntryTimeframes" name="entry_timeframes" type="hidden" value="M5,M10,M15,M30,H1" />
@@ -717,6 +728,37 @@
         pill.dataset.state = state;
       }
 
+      function syncOptimizerMarketFromSetup() {
+        const setupSource = document.getElementById("dataSourceInput");
+        const optimizerSource = document.getElementById("optimizerDataSourceInput");
+        const setupSymbol = document.getElementById("symbolInput");
+        const optimizerSymbol = document.getElementById("optimizerSymbolInput");
+        if (setupSource && optimizerSource) {
+          optimizerSource.innerHTML = setupSource.innerHTML;
+          optimizerSource.value = setupSource.value || optimizerSource.value;
+        }
+        if (setupSymbol && optimizerSymbol) optimizerSymbol.value = setupSymbol.value || optimizerSymbol.value;
+      }
+
+      function syncSetupMarketFromOptimizer() {
+        const setupSource = document.getElementById("dataSourceInput");
+        const optimizerSource = document.getElementById("optimizerDataSourceInput");
+        const setupSymbol = document.getElementById("symbolInput");
+        const optimizerSymbol = document.getElementById("optimizerSymbolInput");
+        if (setupSource && optimizerSource && optimizerSource.value && setupSource.value !== optimizerSource.value) {
+          setupSource.value = optimizerSource.value;
+          updateTimeframeOptions("M5", "M15");
+          fillOptimizerTimeframes();
+        }
+        if (setupSymbol && optimizerSymbol) setupSymbol.value = optimizerSymbol.value;
+        updateSetupFieldWidths();
+      }
+
+      function setMarketSymbol(symbol) {
+        document.getElementById("symbolInput").value = symbol;
+        document.getElementById("optimizerSymbolInput").value = symbol;
+      }
+
       async function readJson(response) {
         const text = await response.text();
         if (!text.trim()) {
@@ -766,6 +808,7 @@
         updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M15");
         fillOptimizerTimeframes();
         document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD";
+        syncOptimizerMarketFromSetup();
         document.getElementById("timeframeInput").value = cfg.timeframe || "M5";
         document.getElementById("trailTimeframeInput").value = cfg.trail_timeframe || cfg.timeframe || "M15";
         document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
@@ -828,12 +871,16 @@
         ];
         document.getElementById("dataSourceInput").innerHTML =
           sources.map((item) => `<option value="${item.value}">${item.label}</option>`).join("");
+        document.getElementById("optimizerDataSourceInput").innerHTML =
+          document.getElementById("dataSourceInput").innerHTML;
         if (defaults) {
           document.getElementById("fromDateInput").value = defaults.from_date;
           document.getElementById("toDateInput").value = defaults.to_date;
           const cfg = defaults.defaults || {};
           document.getElementById("dataSourceInput").value = cfg.data_source || "DELTA";
+          document.getElementById("optimizerDataSourceInput").value = cfg.data_source || "DELTA";
           document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD";
+          document.getElementById("optimizerSymbolInput").value = cfg.symbol || "BTCUSD";
           updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M15");
           document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
           Object.entries(cfg).forEach(([name, value]) => {
@@ -844,6 +891,7 @@
           updateTimeframeOptions("M5", "M15");
         }
         fillOptimizerTimeframes();
+        syncOptimizerMarketFromSetup();
         updateSetupFieldWidths();
       }
 
@@ -929,8 +977,8 @@
       function fillOptimizerTimeframes() {
         const source = document.getElementById("dataSourceInput").value || "DELTA";
         const timeframes = sourceTimeframes[source] || sourceTimeframes.MT5;
-        const scanDefaults = ["M5", "M10", "M15", "M30", "H1"];
-        const entryDefaults = scanDefaults.filter((item) => timeframes.includes(item));
+        const scanDefaults = source === "MT5" ? timeframes : ["M5", "M10", "M15", "M30", "H1"];
+        const entryDefaults = (source === "MT5" ? timeframes.filter((item) => item !== "M4") : scanDefaults).filter((item) => timeframes.includes(item));
         const trailDefaults = scanDefaults.filter((item) => timeframes.includes(item));
         const setupEntryCutoff = document.querySelector('#backtestForm [name="entry_cutoff"]')?.value || "19:00";
         const setupSessionEnd = document.querySelector('#backtestForm [name="session_end"]')?.value || "21:30";
@@ -973,14 +1021,17 @@
             availableSymbols = symbols;
             if (!document.getElementById("symbolInput").value) {
               const preferred = source === "DELTA" ? "BTCUSD" : "BTCUSD#";
-              document.getElementById("symbolInput").value = symbols.includes(preferred) ? preferred : symbols[0] || "";
+              setMarketSymbol(symbols.includes(preferred) ? preferred : symbols[0] || "");
             }
-            renderSymbolMenu();
+            if (!document.getElementById("optimizerSymbolInput").value) {
+              document.getElementById("optimizerSymbolInput").value = document.getElementById("symbolInput").value;
+            }
+            renderSymbolMenu("symbolInput", "symbolMenu");
+            renderSymbolMenu("optimizerSymbolInput", "optimizerSymbolMenu");
           }
         } catch {
           if (!document.getElementById("symbolInput").value) {
-            document.getElementById("symbolInput").value =
-              document.getElementById("dataSourceInput").value === "DELTA" ? "BTCUSD" : "BTCUSD#";
+            setMarketSymbol(document.getElementById("dataSourceInput").value === "DELTA" ? "BTCUSD" : "BTCUSD#");
           }
         }
       }
@@ -1032,9 +1083,9 @@
         }
       }
 
-      function renderSymbolMenu() {
-        const input = document.getElementById("symbolInput");
-        const menu = document.getElementById("symbolMenu");
+      function renderSymbolMenu(inputId = "symbolInput", menuId = "symbolMenu") {
+        const input = document.getElementById(inputId);
+        const menu = document.getElementById(menuId);
         const query = input.value.trim().toLowerCase();
         const matches = availableSymbols
           .filter((symbol) => !query || symbol.toLowerCase().includes(query))
@@ -1130,6 +1181,7 @@
           const input = document.querySelector(`#backtestForm [name="${name}"]`);
           if (input) input.value = value;
         });
+        syncOptimizerMarketFromSetup();
         loadSymbols();
         loadHistoryInfo();
         loadLatestOptimizer();
@@ -1303,6 +1355,7 @@
       }
 
       function optimizerPayload() {
+        syncSetupMarketFromOptimizer();
         const scanValues = Object.fromEntries(new FormData(document.getElementById("optimizerForm")).entries());
         return {
           ...collectForm(),
@@ -1416,8 +1469,8 @@
 
       function optimizerScope() {
         return {
-          source: document.getElementById("dataSourceInput").value || "DELTA",
-          symbol: document.getElementById("symbolInput").value.trim(),
+          source: document.getElementById("optimizerDataSourceInput").value || document.getElementById("dataSourceInput").value || "DELTA",
+          symbol: (document.getElementById("optimizerSymbolInput").value || document.getElementById("symbolInput").value).trim(),
         };
       }
 
@@ -2536,24 +2589,45 @@
         renderTrades();
       });
       document.getElementById("symbolInput").addEventListener("focus", () => {
-        renderSymbolMenu();
+        renderSymbolMenu("symbolInput", "symbolMenu");
         document.getElementById("symbolMenu").classList.add("open");
       });
       document.getElementById("symbolInput").addEventListener("input", () => {
-        renderSymbolMenu();
+        document.getElementById("optimizerSymbolInput").value = document.getElementById("symbolInput").value;
+        renderSymbolMenu("symbolInput", "symbolMenu");
         document.getElementById("symbolMenu").classList.add("open");
+      });
+      document.getElementById("optimizerSymbolInput").addEventListener("focus", () => {
+        renderSymbolMenu("optimizerSymbolInput", "optimizerSymbolMenu");
+        document.getElementById("optimizerSymbolMenu").classList.add("open");
+      });
+      document.getElementById("optimizerSymbolInput").addEventListener("input", () => {
+        document.getElementById("symbolInput").value = document.getElementById("optimizerSymbolInput").value;
+        renderSymbolMenu("optimizerSymbolInput", "optimizerSymbolMenu");
+        document.getElementById("optimizerSymbolMenu").classList.add("open");
       });
       document.getElementById("symbolMenu").addEventListener("click", (event) => {
         const button = event.target.closest("button[data-symbol]");
         if (!button) return;
-        document.getElementById("symbolInput").value = button.dataset.symbol;
+        setMarketSymbol(button.dataset.symbol);
         resizeSetupField(document.getElementById("symbolInput"));
         document.getElementById("symbolMenu").classList.remove("open");
         loadHistoryInfo();
+        loadLatestOptimizer();
+      });
+      document.getElementById("optimizerSymbolMenu").addEventListener("click", (event) => {
+        const button = event.target.closest("button[data-symbol]");
+        if (!button) return;
+        setMarketSymbol(button.dataset.symbol);
+        resizeSetupField(document.getElementById("symbolInput"));
+        document.getElementById("optimizerSymbolMenu").classList.remove("open");
+        loadHistoryInfo();
+        loadLatestOptimizer();
       });
       document.addEventListener("click", (event) => {
         if (!event.target.closest(".symbol-combo")) {
           document.getElementById("symbolMenu").classList.remove("open");
+          document.getElementById("optimizerSymbolMenu").classList.remove("open");
         }
       });
       document.getElementById("tradeRows").addEventListener("click", (event) => {
@@ -2619,11 +2693,30 @@
       document.getElementById("fromDateInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("toDateInput").addEventListener("change", loadHistoryInfo);
       document.getElementById("symbolInput").addEventListener("change", loadHistoryInfo);
-      document.getElementById("symbolInput").addEventListener("change", () => loadLatestOptimizer());
+      document.getElementById("symbolInput").addEventListener("change", () => {
+        document.getElementById("optimizerSymbolInput").value = document.getElementById("symbolInput").value;
+        loadLatestOptimizer();
+      });
+      document.getElementById("optimizerSymbolInput").addEventListener("change", () => {
+        document.getElementById("symbolInput").value = document.getElementById("optimizerSymbolInput").value;
+        loadHistoryInfo();
+        loadLatestOptimizer();
+      });
       document.getElementById("dataSourceInput").addEventListener("change", async () => {
         updateTimeframeOptions("M5", "M15");
         fillOptimizerTimeframes();
-        document.getElementById("symbolInput").value = "";
+        document.getElementById("optimizerDataSourceInput").value = document.getElementById("dataSourceInput").value;
+        setMarketSymbol("");
+        availableSymbols = [];
+        await loadSymbols();
+        await loadLatestOptimizer();
+        loadHistoryInfo();
+      });
+      document.getElementById("optimizerDataSourceInput").addEventListener("change", async () => {
+        document.getElementById("dataSourceInput").value = document.getElementById("optimizerDataSourceInput").value;
+        updateTimeframeOptions("M5", "M15");
+        fillOptimizerTimeframes();
+        setMarketSymbol("");
         availableSymbols = [];
         await loadSymbols();
         await loadLatestOptimizer();

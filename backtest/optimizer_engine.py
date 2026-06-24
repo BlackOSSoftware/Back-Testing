@@ -282,9 +282,13 @@ def build_execution_layout(signal_df: pd.DataFrame, execution_df: pd.DataFrame, 
 
         range_left = int(np.searchsorted(signal_times, range_start.value, side="left"))
         range_right = int(np.searchsorted(signal_times, range_end.value, side="left"))
+        signal_session_left = int(np.searchsorted(signal_times, session_start.value, side="left"))
+        signal_session_right = int(np.searchsorted(signal_times, session_end.value, side="right"))
+        signal_cutoff_right = int(np.searchsorted(signal_times, entry_cutoff.value, side="right"))
         session_left = int(np.searchsorted(execution_times, session_start.value, side="left"))
         session_right = int(np.searchsorted(execution_times, session_end.value, side="right"))
-        if range_left >= range_right or session_left >= session_right:
+        cutoff_signal_right = min(signal_session_right, signal_cutoff_right)
+        if range_left >= range_right or session_left >= session_right or signal_session_left >= cutoff_signal_right:
             continue
 
         session_indices = np.arange(session_left, session_right, dtype=np.int64)
@@ -292,7 +296,14 @@ def build_execution_layout(signal_df: pd.DataFrame, execution_df: pd.DataFrame, 
         starts.append(offset)
         ends.append(offset + size)
 
-        cutoff_right = int(np.searchsorted(execution_times, entry_cutoff.value, side="right"))
+        last_signal_pos = cutoff_signal_right - 1
+        if last_signal_pos + 1 < signal_session_right:
+            cutoff_end_value = signal_times[last_signal_pos + 1]
+        else:
+            timeframe_ns = TIMEFRAME_MINUTES[config.timeframe.upper()] * 60 * 1_000_000_000
+            session_end_plus_one = session_end.value + 60 * 1_000_000_000
+            cutoff_end_value = min(signal_times[last_signal_pos] + timeframe_ns, session_end_plus_one)
+        cutoff_right = int(np.searchsorted(execution_times, cutoff_end_value, side="left"))
         cutoff_ends.append(offset + max(0, min(size, cutoff_right - session_left)))
         range_highs.append(float(np.max(signal_highs[range_left:range_right])))
         range_lows.append(float(np.min(signal_lows[range_left:range_right])))

@@ -946,6 +946,14 @@ select {
   grid-column: span 2;
 }
 
+.optimizer-market-label {
+  grid-column: span 2;
+}
+
+.optimizer-market-label .symbol-combo {
+  width: 100%;
+}
+
 .optimizer-timing-group {
   display: grid;
   gap: 10px;
@@ -2389,6 +2397,10 @@ td small {
     grid-column: span 1;
   }
 
+  .optimizer-market-label {
+    grid-column: span 1;
+  }
+
   .metric-grid,
   .points-summary {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -2695,6 +2707,10 @@ td small {
   }
 
   .optimizer-picker-label {
+    grid-column: auto;
+  }
+
+  .optimizer-market-label {
     grid-column: auto;
   }
 

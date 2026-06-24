@@ -20,3 +20,4 @@ backtest/report_data.js
 report_data.js
 
 *.log
+*.xlsx
