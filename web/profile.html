@@ -1,0 +1,283 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Profile | Backtest Desk</title>
+    <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
+    <link rel="stylesheet" href="/styles.css?v=2" />
+  </head>
+  <body>
+    <div class="app-shell profile-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark"><i data-lucide="candlestick-chart"></i></div>
+          <div>
+            <strong>Backtest Desk</strong>
+            <span>Personal strategy</span>
+          </div>
+        </div>
+        <nav class="side-nav profile-nav">
+          <a href="/"><i data-lucide="layout-dashboard"></i> Dashboard</a>
+          <a href="/profile" class="active"><i data-lucide="user-round"></i> Profile</a>
+        </nav>
+      </aside>
+
+      <main class="content profile-content">
+        <header class="topbar profile-topbar">
+          <div>
+            <p>Account settings</p>
+            <h1>Profile Details</h1>
+          </div>
+          <div class="top-actions">
+            <div class="user-chip">
+              <span>Signed in as</span>
+              <strong id="signedInUser">...</strong>
+            </div>
+            <a class="secondary-btn profile-link-btn" href="/">
+              <i data-lucide="arrow-left"></i>
+              Dashboard
+            </a>
+            <button id="logoutBtn" class="secondary-btn" type="button">
+              <i data-lucide="log-out"></i>
+              Log out
+            </button>
+          </div>
+        </header>
+
+        <div class="profile-workspace">
+          <div class="profile-main">
+            <section class="panel profile-panel">
+              <div class="panel-title profile-panel-title">
+                <div>
+                  <h2>Account Details</h2>
+                  <p>Contact information</p>
+                </div>
+                <span id="profileStatus" class="status-pill">Ready</span>
+              </div>
+              <form id="profileForm" class="profile-form">
+                <label>
+                  <span>Name</span>
+                  <div class="profile-field">
+                    <i data-lucide="user-round"></i>
+                    <input id="profileName" name="name" autocomplete="name" maxlength="80" required />
+                  </div>
+                </label>
+                <label>
+                  <span>Mobile Number</span>
+                  <div class="profile-field">
+                    <i data-lucide="smartphone"></i>
+                    <input id="mobileNumber" name="mobile_number" type="tel" autocomplete="tel" maxlength="30" placeholder="+91 98765 43210" />
+                  </div>
+                </label>
+                <label>
+                  <span>Customer Support Number</span>
+                  <div class="profile-field">
+                    <i data-lucide="headset"></i>
+                    <input id="supportNumber" name="support_number" type="tel" maxlength="30" placeholder="+91 98765 43210" />
+                  </div>
+                </label>
+                <div class="profile-actions">
+                  <button class="primary-btn profile-save-btn" type="submit">
+                    <i data-lucide="save"></i>
+                    Save Profile
+                  </button>
+                </div>
+              </form>
+            </section>
+
+            <section class="panel password-panel">
+              <div class="panel-title profile-panel-title">
+                <div>
+                  <h2>Change Password</h2>
+                  <p>Update account security</p>
+                </div>
+                <span id="passwordStatus" class="status-pill">Secure</span>
+              </div>
+              <form id="passwordForm" class="profile-form password-form">
+                <label>
+                  <span>Current Password</span>
+                  <div class="profile-field">
+                    <i data-lucide="lock-keyhole"></i>
+                    <input name="current_password" type="password" autocomplete="current-password" required />
+                    <button class="password-toggle" type="button" data-password-toggle aria-label="Show current password">
+                      <i data-lucide="eye"></i>
+                    </button>
+                  </div>
+                </label>
+                <div class="password-grid">
+                  <label>
+                    <span>New Password</span>
+                    <div class="profile-field">
+                      <i data-lucide="key-round"></i>
+                      <input name="new_password" type="password" autocomplete="new-password" minlength="8" required />
+                      <button class="password-toggle" type="button" data-password-toggle aria-label="Show new password">
+                        <i data-lucide="eye"></i>
+                      </button>
+                    </div>
+                  </label>
+                  <label>
+                    <span>Confirm Password</span>
+                    <div class="profile-field">
+                      <i data-lucide="shield-check"></i>
+                      <input name="confirm_password" type="password" autocomplete="new-password" minlength="8" required />
+                      <button class="password-toggle" type="button" data-password-toggle aria-label="Show confirm password">
+                        <i data-lucide="eye"></i>
+                      </button>
+                    </div>
+                  </label>
+                </div>
+                <div class="profile-actions">
+                  <button class="secondary-btn password-save-btn" type="submit">
+                    <i data-lucide="shield-check"></i>
+                    Update Password
+                  </button>
+                </div>
+              </form>
+            </section>
+          </div>
+
+          <aside class="profile-aside">
+            <section class="panel profile-summary">
+              <div id="profileInitial" class="profile-avatar">J</div>
+              <h2 id="summaryName">jayesh</h2>
+              <span class="profile-role">Account holder</span>
+              <dl class="profile-contacts">
+                <div>
+                  <dt><i data-lucide="smartphone"></i> Mobile</dt>
+                  <dd id="summaryMobile">-</dd>
+                </div>
+                <div>
+                  <dt><i data-lucide="headset"></i> Customer Support</dt>
+                  <dd id="summarySupport">-</dd>
+                </div>
+              </dl>
+              <a id="supportCallLink" class="secondary-btn support-call" href="#">
+                <i data-lucide="phone-call"></i>
+                Call Support
+              </a>
+            </section>
+            <section class="panel profile-company">
+              <span>Developed by</span>
+              <strong>Black OS</strong>
+              <p>Software Solutions</p>
+            </section>
+          </aside>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      let csrfToken = "";
+
+      function setProfileStatus(text, state = "ready") {
+        const pill = document.getElementById("profileStatus");
+        pill.textContent = text;
+        pill.dataset.state = state;
+      }
+
+      function setPasswordStatus(text, state = "ready") {
+        const pill = document.getElementById("passwordStatus");
+        pill.textContent = text;
+        pill.dataset.state = state;
+      }
+
+      async function apiJson(url, options = {}) {
+        const requestOptions = { ...options, headers: { ...(options.headers || {}) }, credentials: "include" };
+        if (csrfToken && requestOptions.method && requestOptions.method !== "GET") {
+          requestOptions.headers["X-CSRF-Token"] = csrfToken;
+        }
+        const response = await fetch(url, requestOptions);
+        if (response.status === 401) {
+          window.location.href = "/login";
+          throw new Error("Session expired.");
+        }
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Request failed.");
+        return data;
+      }
+
+      async function loadProfile() {
+        const auth = await apiJson("/api/session");
+        csrfToken = auth.csrf_token;
+        document.getElementById("signedInUser").textContent = auth.username;
+        const profile = await apiJson("/api/profile");
+        document.getElementById("profileName").value = profile.name || auth.username;
+        document.getElementById("mobileNumber").value = profile.mobile_number || "";
+        document.getElementById("supportNumber").value = profile.support_number || "";
+        updateProfilePreview();
+      }
+
+      function updateProfilePreview() {
+        const name = document.getElementById("profileName").value.trim() || "Account Holder";
+        const mobile = document.getElementById("mobileNumber").value.trim() || "-";
+        const support = document.getElementById("supportNumber").value.trim() || "-";
+        const callLink = document.getElementById("supportCallLink");
+        document.getElementById("summaryName").textContent = name;
+        document.getElementById("profileInitial").textContent = name.charAt(0).toUpperCase();
+        document.getElementById("summaryMobile").textContent = mobile;
+        document.getElementById("summarySupport").textContent = support;
+        callLink.href = support === "-" ? "#" : `tel:${support.replace(/[^0-9+]/g, "")}`;
+        callLink.classList.toggle("disabled", support === "-");
+      }
+
+      document.getElementById("profileForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setProfileStatus("Saving...", "loading");
+        const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+        try {
+          await apiJson("/api/profile", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(values),
+          });
+          updateProfilePreview();
+          setProfileStatus("Saved");
+        } catch (error) {
+          setProfileStatus(error.message, "error");
+        }
+      });
+
+      document.querySelectorAll("#profileForm input").forEach((input) => {
+        input.addEventListener("input", updateProfilePreview);
+      });
+
+      document.querySelectorAll("[data-password-toggle]").forEach((button) => {
+        button.addEventListener("click", () => {
+          const input = button.parentElement.querySelector("input");
+          const icon = button.querySelector("i");
+          const isHidden = input.type === "password";
+          input.type = isHidden ? "text" : "password";
+          button.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+          icon.setAttribute("data-lucide", isHidden ? "eye-off" : "eye");
+          if (window.lucide) lucide.createIcons();
+        });
+      });
+
+      document.getElementById("passwordForm").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        setPasswordStatus("Updating...", "loading");
+        const values = Object.fromEntries(new FormData(event.currentTarget).entries());
+        try {
+          await apiJson("/api/profile/password", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(values),
+          });
+          event.currentTarget.reset();
+          setPasswordStatus("Updated");
+        } catch (error) {
+          setPasswordStatus(error.message, "error");
+        }
+      });
+
+      document.getElementById("logoutBtn").addEventListener("click", async () => {
+        await fetch("/logout", { method: "POST", headers: { "X-CSRF-Token": csrfToken } });
+        window.location.href = "/login";
+      });
+
+      loadProfile().catch((error) => setProfileStatus(error.message, "error"));
+      if (window.lucide) lucide.createIcons();
+    </script>
+  </body>
+</html>

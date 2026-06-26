@@ -1,0 +1,105 @@
+{
+  "scan_id": "20260624T104832Z_b9c5020a",
+  "source": "MT5",
+  "symbol": "GOLD.i#",
+  "status": "completed",
+  "message": "Target reached.",
+  "tested": 1,
+  "total": 1,
+  "progress_pct": 100.0,
+  "target_win_rate": 0.0,
+  "minimum_trades": 1,
+  "result_sort": "BALANCED",
+  "save_full_csv": false,
+  "created_at": "2026-06-24T10:48:32.133962+00:00",
+  "updated_at": "2026-06-24T10:48:32.971189+00:00",
+  "result_count": 1,
+  "results_truncated": false,
+  "results": [
+    {
+      "rank": 1,
+      "qualified": true,
+      "entry_pattern": "BOTH",
+      "timeframe": "H4",
+      "trail_timeframe": "M1",
+      "range_start": "06:30",
+      "range_end": "07:30",
+      "session_start": "07:30",
+      "entry_cutoff": "19:00",
+      "session_end": "21:30",
+      "entry_buffer_pct": 0.25,
+      "stop_points": 400.0,
+      "stop_points_unit": "POINTS",
+      "first_trail_profit": 400.0,
+      "first_trail_profit_unit": "POINTS",
+      "first_trail_lock_loss": 300.0,
+      "first_trail_lock_loss_unit": "POINTS",
+      "second_trail_profit": 700.0,
+      "second_trail_profit_unit": "POINTS",
+      "total_trades": 48,
+      "wins": 28,
+      "losses": 20,
+      "win_rate_pct": 58.33,
+      "net_points": 334.62,
+      "profit_factor": 1.48,
+      "max_drawdown_points": -219.05
+    }
+  ],
+  "elapsed_seconds": 0.84,
+  "best_win_rate": 58.33,
+  "stopped_early": false,
+  "target_found": true,
+  "scan_config": {
+    "engine_version": 3,
+    "symbol": "GOLD.i#",
+    "data_source": "MT5",
+    "from_date": "2025-06-01",
+    "to_date": "2026-05-25",
+    "time_profiles": [
+      {
+        "range_start": "06:30",
+        "range_end": "07:30",
+        "session_start": "07:30",
+        "entry_cutoff": "19:00",
+        "session_end": "21:30"
+      }
+    ],
+    "entry_timeframes": [
+      "H4"
+    ],
+    "trail_timeframes": [
+      "M1"
+    ],
+    "entry_patterns": [
+      "BOTH"
+    ],
+    "parameters": {
+      "entry_buffer_pct": [
+        0.25
+      ],
+      "stop_points": [
+        400.0
+      ],
+      "first_trail_profit": [
+        400.0
+      ],
+      "first_trail_lock_loss": [
+        300.0
+      ],
+      "second_trail_profit": [
+        700.0
+      ]
+    },
+    "distance_units": {
+      "stop_points_unit": "POINTS",
+      "first_trail_profit_unit": "POINTS",
+      "first_trail_lock_loss_unit": "POINTS",
+      "second_trail_profit_unit": "POINTS"
+    },
+    "target_win_rate": 0.0,
+    "minimum_trades": 1,
+    "result_sort": "BALANCED",
+    "stop_on_target": false,
+    "save_full_csv": false
+  }
+}

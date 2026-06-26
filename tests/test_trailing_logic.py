@@ -1,0 +1,384 @@
+from __future__ import annotations
+
+import sys
+import unittest
+from datetime import date, time
+from pathlib import Path
+
+import numpy as np
+import pandas as pd
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+
+from backtest.backtest_mt5 import (  # noqa: E402
+    BacktestConfig,
+    IST,
+    backtest,
+    current_and_previous_high,
+    manage_buy_trade,
+    manage_sell_trade,
+    price_at_or_above,
+)
+from backtest.optimizer_engine import EntryLayout, ScanContext, build_scan_context, evaluate_scan  # noqa: E402
+
+
+DAY = date(2026, 5, 15)
+
+
+def candle_time(value: str) -> pd.Timestamp:
+    hour, minute = (int(part) for part in value.split(":"))
+    return pd.Timestamp.combine(DAY, time(hour, minute)).tz_localize(IST)
+
+
+def candle_frame(rows: list[tuple[str, float, float, float, float]]) -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "time_ist": candle_time(start),
+                "trade_date": DAY,
+                "open": open_,
+                "high": high,
+                "low": low,
+                "close": close,
+                "tick_volume": 1,
+            }
+            for start, open_, high, low, close in rows
+        ]
+    )
+
+
+class TrailingStopLogicTest(unittest.TestCase):
+    def test_trail_uses_only_fully_closed_candles(self) -> None:
+        trail = candle_frame(
+            [
+                ("10:30", 4606.41, 4606.41, 4599.06, 4599.06),
+                ("10:35", 4599.06, 4601.31, 4592.55, 4592.55),
+                ("10:40", 4592.55, 4593.55, 4588.41, 4588.41),
+                ("10:45", 4592.14, 4595.30, 4581.57, 4583.01),
+                ("10:50", 4583.02, 4589.24, 4580.85, 4584.85),
+                ("10:55", 4584.80, 4590.16, 4583.48, 4588.82),
+                ("11:00", 4588.88, 4589.77, 4567.39, 4569.65),
+            ]
+        )
+
+        self.assertEqual(current_and_previous_high(trail, candle_time("10:55"), "M5"), 4595.30)
+        self.assertEqual(current_and_previous_high(trail, candle_time("10:59"), "M5"), 4595.30)
+        self.assertEqual(current_and_previous_high(trail, candle_time("11:00"), "M5"), 4590.16)
+
+    def test_sell_trail_does_not_exit_inside_candle_that_created_sl(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:48", 4587.51, 4589.26, 4584.39, 4584.50),
+                ("10:49", 4584.40, 4584.70, 4581.57, 4583.01),
+                ("10:50", 4583.02, 4583.41, 4580.85, 4581.84),
+                ("10:51", 4581.96, 4588.18, 4581.56, 4587.37),
+                ("10:52", 4587.35, 4589.24, 4585.95, 4587.55),
+                ("10:53", 4587.56, 4587.56, 4583.44, 4583.96),
+                ("10:54", 4583.92, 4586.72, 4582.07, 4584.85),
+                ("10:55", 4584.80, 4586.91, 4584.08, 4585.20),
+                ("10:56", 4585.11, 4585.98, 4583.48, 4585.07),
+                ("10:57", 4585.13, 4587.19, 4584.27, 4585.15),
+                ("10:58", 4585.36, 4588.85, 4585.36, 4588.21),
+                ("10:59", 4588.24, 4590.16, 4587.38, 4588.82),
+                ("11:00", 4588.88, 4589.77, 4580.59, 4580.74),
+                ("11:01", 4580.77, 4581.26, 4578.03, 4578.35),
+            ]
+        )
+        trail = candle_frame(
+            [
+                ("10:30", 4606.41, 4606.41, 4599.06, 4599.06),
+                ("10:35", 4599.06, 4601.31, 4592.55, 4592.55),
+                ("10:40", 4592.55, 4593.55, 4588.41, 4588.41),
+                ("10:45", 4592.14, 4595.30, 4581.57, 4583.01),
+                ("10:50", 4583.02, 4589.24, 4580.85, 4584.85),
+                ("10:55", 4584.80, 4590.16, 4583.48, 4588.82),
+                ("11:00", 4588.88, 4589.77, 4567.39, 4569.65),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="GOLD.i#",
+            from_date=DAY,
+            to_date=DAY,
+            data_source="MT5",
+            timeframe="M5",
+            trail_timeframe="M5",
+            session_end=time(11, 1),
+            stop_points=10.0,
+            first_trail_profit=10.0,
+            first_trail_lock_loss=0.0,
+            second_trail_profit=20.0,
+        )
+
+        result = manage_sell_trade(execution, trail, 0, 4606.50, config)
+
+        self.assertEqual(result[0], "2026-05-15T11:01:00+05:30")
+        self.assertEqual(result[2], "FORCE_EXIT")
+        self.assertEqual(result[7], "2026-05-15T11:00:00+05:30")
+        self.assertEqual(result[8], 4590.16)
+
+    def test_optimizer_context_uses_same_closed_candle_rule(self) -> None:
+        trail = candle_frame(
+            [
+                ("10:30", 4606.41, 4606.41, 4599.06, 4599.06),
+                ("10:35", 4599.06, 4601.31, 4592.55, 4592.55),
+                ("10:40", 4592.55, 4593.55, 4588.41, 4588.41),
+                ("10:45", 4592.14, 4595.30, 4581.57, 4583.01),
+                ("10:50", 4583.02, 4589.24, 4580.85, 4584.85),
+                ("10:55", 4584.80, 4590.16, 4583.48, 4588.82),
+                ("11:00", 4588.88, 4589.77, 4567.39, 4569.65),
+            ]
+        )
+        times = np.asarray([candle_time(value).value for value in ("10:55", "10:59", "11:00")], dtype=np.int64)
+        prices = np.zeros(len(times), dtype=np.float64)
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([len(times)], dtype=np.int64),
+            cutoff_ends=np.asarray([len(times)], dtype=np.int64),
+            range_highs=np.asarray([0.0], dtype=np.float64),
+            range_lows=np.asarray([0.0], dtype=np.float64),
+            times_ns=times,
+            opens=prices,
+            highs=prices,
+            lows=prices,
+            closes=prices,
+            at_session_end=np.asarray([False, False, True], dtype=np.bool_),
+        )
+
+        context = build_scan_context(layout, trail, "M5")
+
+        self.assertEqual(context.trail_highs.tolist(), [4595.30, 4595.30, 4590.16])
+
+    def test_price_epsilon_does_not_hide_real_price_gap(self) -> None:
+        self.assertFalse(price_at_or_above(4589.77, 4590.16))
+        self.assertFalse(price_at_or_above(4590.11, 4590.16))
+        self.assertTrue(price_at_or_above(4590.16 - 5e-10, 4590.16))
+
+    def test_buy_percent_trailing_distances_use_entry_price(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:00", 100.0, 111.0, 99.0, 110.0),
+                ("10:01", 110.0, 110.0, 101.5, 102.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            stop_points=20.0,
+            first_trail_profit=10.0,
+            first_trail_lock_loss=2.0,
+            second_trail_profit=50.0,
+            stop_points_unit="PERCENT",
+            first_trail_profit_unit="PERCENT",
+            first_trail_lock_loss_unit="PERCENT",
+            second_trail_profit_unit="PERCENT",
+            session_end=time(10, 2),
+        )
+
+        result = manage_buy_trade(execution, execution, 0, 100.0, config)
+
+        self.assertEqual(result[1], 102.0)
+        self.assertEqual(result[2], "FIRST_TRAIL_SL")
+        self.assertEqual(result[6], 102.0)
+
+    def test_buy_first_trail_lock_supports_profit_and_breakeven_modes(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:00", 1000.0, 1600.0, 999.0, 1500.0),
+                ("10:01", 1500.0, 1500.0, 650.0, 800.0),
+            ]
+        )
+        common = {
+            "symbol": "TEST",
+            "from_date": DAY,
+            "to_date": DAY,
+            "stop_points": 300.0,
+            "first_trail_profit": 600.0,
+            "second_trail_profit": 2000.0,
+            "session_end": time(10, 2),
+        }
+
+        profit_lock = BacktestConfig(**common, first_trail_lock_loss=300.0)
+        breakeven_lock = BacktestConfig(**common, first_trail_lock_loss=-300.0)
+
+        profit_result = manage_buy_trade(execution, execution, 0, 1000.0, profit_lock)
+        breakeven_result = manage_buy_trade(execution, execution, 0, 1000.0, breakeven_lock)
+
+        self.assertEqual(profit_result[1], 1300.0)
+        self.assertEqual(profit_result[2], "FIRST_TRAIL_SL")
+        self.assertEqual(profit_result[6], 1300.0)
+        self.assertEqual(breakeven_result[1], 1000.0)
+        self.assertEqual(breakeven_result[2], "FIRST_TRAIL_SL")
+        self.assertEqual(breakeven_result[6], 1000.0)
+
+    def test_backtest_rows_include_points_and_percent_distances(self) -> None:
+        frame = candle_frame(
+            [
+                ("08:30", 95.0, 100.0, 90.0, 95.0),
+                ("09:30", 100.0, 101.0, 95.0, 100.0),
+                ("09:31", 100.0, 100.0, 89.0, 90.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            timeframe="M1",
+            trail_timeframe="M1",
+            range_start=time(8, 30),
+            range_end=time(9, 30),
+            session_start=time(9, 30),
+            entry_cutoff=time(9, 30),
+            session_end=time(9, 31),
+            entry_buffer_pct=0.0,
+            stop_points=10.0,
+            stop_points_unit="PERCENT",
+            first_trail_profit=50.0,
+            first_trail_profit_unit="PERCENT",
+            first_trail_lock_loss=0.0,
+            second_trail_profit=80.0,
+            second_trail_profit_unit="PERCENT",
+        )
+
+        trades = backtest(frame, config, frame, frame)
+
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0].exit_price, 90.0)
+        self.assertEqual(trades[0].stop_distance_points, 10.0)
+        self.assertEqual(trades[0].stop_distance_pct, 10.0)
+        self.assertEqual(trades[0].pnl_points, -10.0)
+        self.assertEqual(trades[0].pnl_pct, -10.0)
+
+    def test_first_trail_lock_does_not_move_to_unreached_price(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:00", 100.0, 101.0, 99.0, 100.0),
+                ("10:01", 100.0, 101.0, 99.0, 100.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            stop_points=10.0,
+            first_trail_profit=0.0,
+            first_trail_lock_loss=400.0,
+            second_trail_profit=700.0,
+            session_end=time(10, 1),
+        )
+
+        result = manage_buy_trade(execution, execution, 0, 100.0, config)
+
+        self.assertEqual(result[1], 100.0)
+        self.assertEqual(result[2], "FORCE_EXIT")
+        self.assertIsNone(result[5])
+        self.assertIsNone(result[6])
+
+    def test_optimizer_percent_stop_is_converted_per_entry(self) -> None:
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([2], dtype=np.int64),
+            cutoff_ends=np.asarray([2], dtype=np.int64),
+            range_highs=np.asarray([200.0], dtype=np.float64),
+            range_lows=np.asarray([180.0], dtype=np.float64),
+            times_ns=np.asarray([candle_time("09:30").value, candle_time("09:31").value], dtype=np.int64),
+            opens=np.asarray([200.0, 200.0], dtype=np.float64),
+            highs=np.asarray([200.0, 201.0], dtype=np.float64),
+            lows=np.asarray([195.0, 179.0], dtype=np.float64),
+            closes=np.asarray([200.0, 180.0], dtype=np.float64),
+            at_session_end=np.asarray([False, True], dtype=np.bool_),
+        )
+        context = ScanContext(
+            layout=layout,
+            trail_lows=np.asarray([np.nan, np.nan], dtype=np.float64),
+            trail_highs=np.asarray([np.nan, np.nan], dtype=np.float64),
+        )
+
+        stats = evaluate_scan(
+            context,
+            0.0,
+            10.0,
+            50.0,
+            0.0,
+            80.0,
+            side_filter=1,
+            stop_points_unit="PERCENT",
+            first_trail_profit_unit="PERCENT",
+            second_trail_profit_unit="PERCENT",
+        )
+
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(stats["net_points"], -20.0)
+
+    def test_optimizer_first_lock_does_not_create_unreached_profit(self) -> None:
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([2], dtype=np.int64),
+            cutoff_ends=np.asarray([2], dtype=np.int64),
+            range_highs=np.asarray([100.0], dtype=np.float64),
+            range_lows=np.asarray([90.0], dtype=np.float64),
+            times_ns=np.asarray([candle_time("09:30").value, candle_time("09:31").value], dtype=np.int64),
+            opens=np.asarray([100.0, 100.0], dtype=np.float64),
+            highs=np.asarray([101.0, 101.0], dtype=np.float64),
+            lows=np.asarray([99.0, 99.0], dtype=np.float64),
+            closes=np.asarray([100.0, 100.0], dtype=np.float64),
+            at_session_end=np.asarray([False, True], dtype=np.bool_),
+        )
+        context = ScanContext(
+            layout=layout,
+            trail_lows=np.asarray([np.nan, np.nan], dtype=np.float64),
+            trail_highs=np.asarray([np.nan, np.nan], dtype=np.float64),
+        )
+
+        stats = evaluate_scan(
+            context,
+            0.0,
+            10.0,
+            0.0,
+            400.0,
+            700.0,
+            side_filter=1,
+        )
+
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(stats["net_points"], 0.0)
+
+    def test_optimizer_negative_first_lock_moves_to_breakeven_after_target(self) -> None:
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([3], dtype=np.int64),
+            cutoff_ends=np.asarray([3], dtype=np.int64),
+            range_highs=np.asarray([1000.0], dtype=np.float64),
+            range_lows=np.asarray([900.0], dtype=np.float64),
+            times_ns=np.asarray(
+                [candle_time("09:30").value, candle_time("09:31").value, candle_time("09:32").value],
+                dtype=np.int64,
+            ),
+            opens=np.asarray([1000.0, 1500.0, 800.0], dtype=np.float64),
+            highs=np.asarray([1600.0, 1500.0, 800.0], dtype=np.float64),
+            lows=np.asarray([999.0, 650.0, 800.0], dtype=np.float64),
+            closes=np.asarray([1500.0, 800.0, 800.0], dtype=np.float64),
+            at_session_end=np.asarray([False, False, True], dtype=np.bool_),
+        )
+        context = ScanContext(
+            layout=layout,
+            trail_lows=np.asarray([np.nan, np.nan, np.nan], dtype=np.float64),
+            trail_highs=np.asarray([np.nan, np.nan, np.nan], dtype=np.float64),
+        )
+
+        stats = evaluate_scan(
+            context,
+            0.0,
+            300.0,
+            600.0,
+            -300.0,
+            2000.0,
+            side_filter=1,
+        )
+
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(stats["net_points"], 0.0)
+
+
+if __name__ == "__main__":
+    unittest.main()

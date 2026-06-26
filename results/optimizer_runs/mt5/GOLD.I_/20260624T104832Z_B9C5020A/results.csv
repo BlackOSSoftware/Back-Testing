@@ -1,0 +1,2 @@
+rank,qualified,entry_pattern,timeframe,trail_timeframe,range_start,range_end,session_start,entry_cutoff,session_end,entry_buffer_pct,stop_points,stop_points_unit,first_trail_profit,first_trail_profit_unit,first_trail_lock_loss,first_trail_lock_loss_unit,second_trail_profit,second_trail_profit_unit,total_trades,wins,losses,win_rate_pct,net_points,profit_factor,max_drawdown_points
+1,True,BOTH,H4,M1,06:30,07:30,07:30,19:00,21:30,0.25,400.0,POINTS,400.0,POINTS,300.0,POINTS,700.0,POINTS,48,28,20,58.33,334.62,1.48,-219.05
