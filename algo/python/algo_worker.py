@@ -510,6 +510,11 @@ def choose_signal(candle: dict[str, Any], buy_trigger: float, sell_trigger: floa
     return ""
 
 
+def first_trail_lock_stop(entry_price: float, lock_distance: float, side: str) -> float:
+    effective_lock = max(float(lock_distance), 0.0)
+    return entry_price + effective_lock if side == "BUY" else entry_price - effective_lock
+
+
 def scan_signal(connection: sqlite3.Connection, strategy_id: str | None = None) -> dict[str, Any]:
     if strategy_id:
         row = connection.execute("SELECT * FROM strategies WHERE id = ?", (strategy_id,)).fetchone()
@@ -600,6 +605,12 @@ def scan_signal(connection: sqlite3.Connection, strategy_id: str | None = None) 
             continue
         entry_reference = buy_trigger if side == "BUY" else sell_trigger
         stop_loss = entry_reference - strategy["stop_points"] if side == "BUY" else entry_reference + strategy["stop_points"]
+        first_trail_trigger = (
+            entry_reference + strategy["first_trail_profit"]
+            if side == "BUY"
+            else entry_reference - strategy["first_trail_profit"]
+        )
+        first_trail_stop = first_trail_lock_stop(entry_reference, strategy["first_trail_lock_loss"], side)
         result.update(
             {
                 "status": f"{side} signal",
@@ -607,6 +618,8 @@ def scan_signal(connection: sqlite3.Connection, strategy_id: str | None = None) 
                 "side": side,
                 "entry_reference": entry_reference,
                 "stop_loss": stop_loss,
+                "first_trail_trigger": first_trail_trigger,
+                "first_trail_stop": first_trail_stop,
                 "trigger_candle_time": candle["time_ist"].isoformat(),
             }
         )

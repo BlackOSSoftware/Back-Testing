@@ -181,6 +181,36 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertEqual(result[2], "FIRST_TRAIL_SL")
         self.assertEqual(result[6], 102.0)
 
+    def test_buy_first_trail_lock_supports_profit_and_breakeven_modes(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:00", 1000.0, 1600.0, 999.0, 1500.0),
+                ("10:01", 1500.0, 1500.0, 650.0, 800.0),
+            ]
+        )
+        common = {
+            "symbol": "TEST",
+            "from_date": DAY,
+            "to_date": DAY,
+            "stop_points": 300.0,
+            "first_trail_profit": 600.0,
+            "second_trail_profit": 2000.0,
+            "session_end": time(10, 2),
+        }
+
+        profit_lock = BacktestConfig(**common, first_trail_lock_loss=300.0)
+        breakeven_lock = BacktestConfig(**common, first_trail_lock_loss=-300.0)
+
+        profit_result = manage_buy_trade(execution, execution, 0, 1000.0, profit_lock)
+        breakeven_result = manage_buy_trade(execution, execution, 0, 1000.0, breakeven_lock)
+
+        self.assertEqual(profit_result[1], 1300.0)
+        self.assertEqual(profit_result[2], "FIRST_TRAIL_SL")
+        self.assertEqual(profit_result[6], 1300.0)
+        self.assertEqual(breakeven_result[1], 1000.0)
+        self.assertEqual(breakeven_result[2], "FIRST_TRAIL_SL")
+        self.assertEqual(breakeven_result[6], 1000.0)
+
     def test_backtest_rows_include_points_and_percent_distances(self) -> None:
         frame = candle_frame(
             [
@@ -307,6 +337,42 @@ class TrailingStopLogicTest(unittest.TestCase):
             0.0,
             400.0,
             700.0,
+            side_filter=1,
+        )
+
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(stats["net_points"], 0.0)
+
+    def test_optimizer_negative_first_lock_moves_to_breakeven_after_target(self) -> None:
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([3], dtype=np.int64),
+            cutoff_ends=np.asarray([3], dtype=np.int64),
+            range_highs=np.asarray([1000.0], dtype=np.float64),
+            range_lows=np.asarray([900.0], dtype=np.float64),
+            times_ns=np.asarray(
+                [candle_time("09:30").value, candle_time("09:31").value, candle_time("09:32").value],
+                dtype=np.int64,
+            ),
+            opens=np.asarray([1000.0, 1500.0, 800.0], dtype=np.float64),
+            highs=np.asarray([1600.0, 1500.0, 800.0], dtype=np.float64),
+            lows=np.asarray([999.0, 650.0, 800.0], dtype=np.float64),
+            closes=np.asarray([1500.0, 800.0, 800.0], dtype=np.float64),
+            at_session_end=np.asarray([False, False, True], dtype=np.bool_),
+        )
+        context = ScanContext(
+            layout=layout,
+            trail_lows=np.asarray([np.nan, np.nan, np.nan], dtype=np.float64),
+            trail_highs=np.asarray([np.nan, np.nan, np.nan], dtype=np.float64),
+        )
+
+        stats = evaluate_scan(
+            context,
+            0.0,
+            300.0,
+            600.0,
+            -300.0,
+            2000.0,
             side_filter=1,
         )
 

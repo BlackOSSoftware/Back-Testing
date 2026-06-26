@@ -510,8 +510,9 @@ def optimizer_payload(data: dict) -> dict:
         "first_trail_lock_loss_unit": normalize_distance_unit(data.get("first_trail_lock_loss_unit", "POINTS")),
         "second_trail_profit_unit": normalize_distance_unit(data.get("second_trail_profit_unit", "POINTS")),
     }
-    if any(value < 0 for values in parameters.values() for value in values):
-        raise ValueError("Optimizer point and percentage settings must not be negative.")
+    signed_parameters = {"first_trail_lock_loss"}
+    if any(value < 0 for key, values in parameters.items() if key not in signed_parameters for value in values):
+        raise ValueError("Optimizer stop and target settings must not be negative.")
     common = {
         "symbol": symbol,
         "from_date": from_date,

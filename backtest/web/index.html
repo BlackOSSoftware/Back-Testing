@@ -172,9 +172,9 @@
               </div>
             </label>
             <label>
-              <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="First target hit hone ke baad entry se kitni distance par SL lock hoga.">?</button></span>
+              <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="Positive value profit side lock karegi; negative value first target hit hone ke baad SL ko break-even par rakhegi.">?</button></span>
               <div class="risk-control">
-                <input name="first_trail_lock_loss" type="number" value="0" step="0.01" min="0" />
+                <input name="first_trail_lock_loss" type="number" value="0" step="0.01" />
                 <select name="first_trail_lock_loss_unit" aria-label="First SL Lock Unit">
                   <option value="POINTS" selected>Pts</option>
                   <option value="PERCENT">%</option>
@@ -304,7 +304,7 @@
               </div>
             </label>
             <label>
-              <span>First Trail Lock Values <button class="info-btn" type="button" title="First trail active hone ke baad SL entry se selected distance par lock hoga.">?</button></span>
+              <span>First Trail Lock Values <button class="info-btn" type="button" title="Positive values profit side lock karengi; negative values first target hit hone ke baad break-even lock karengi.">?</button></span>
               <div class="risk-control optimizer-risk-control">
                 <input name="first_trail_lock_values" value="300,400,200" placeholder="300,400,200" />
                 <select name="first_trail_lock_loss_unit" aria-label="Optimizer First SL Lock Unit">
@@ -1783,10 +1783,11 @@
         const firstLock = Number(trade.first_trail_lock_points ?? report?.config?.first_trail_lock_loss ?? 0);
         const mfe = Number(trade.mfe_points || 0);
         const entry = Number(trade.entry_price);
-        if (!Number.isFinite(entry) || !firstLock) return null;
+        if (!Number.isFinite(entry) || !Number.isFinite(firstLock)) return null;
         const reachedFirstTrail = trade.exit_reason === "FIRST_TRAIL_SL" || trade.exit_reason === "TWO_CANDLE_TRAIL_SL" || (firstTarget && mfe >= firstTarget);
         if (!reachedFirstTrail) return null;
-        return trade.side === "BUY" ? entry + firstLock : entry - firstLock;
+        const effectiveFirstLock = Math.max(firstLock, 0);
+        return trade.side === "BUY" ? entry + effectiveFirstLock : entry - effectiveFirstLock;
       }
 
       function derivedFirstTrailTime(trade) {

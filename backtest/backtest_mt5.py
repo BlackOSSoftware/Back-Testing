@@ -269,6 +269,11 @@ def lower_stop(candidate: float, current: float) -> bool:
     return candidate < current - PRICE_EPSILON
 
 
+def first_trail_lock_stop(entry_price: float, lock_distance: float, side: str) -> float:
+    effective_lock = max(float(lock_distance), 0.0)
+    return entry_price + effective_lock if side == "BUY" else entry_price - effective_lock
+
+
 def current_and_previous_low(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> float | None:
     position = current_and_previous_trail_position(candles, candle_time, timeframe)
     if position < 1:
@@ -368,7 +373,7 @@ def manage_buy_trade(
             return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
         if price_at_or_above(high, entry_price + first_profit_distance):
-            first_trail_stop = entry_price + first_lock_distance
+            first_trail_stop = first_trail_lock_stop(entry_price, first_lock_distance, "BUY")
             if price_at_or_above(high, first_trail_stop) and higher_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"
@@ -434,7 +439,7 @@ def manage_sell_trade(
             return candle_time.isoformat(), stop, stop_reason, mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
         if price_at_or_below(low, entry_price - first_profit_distance):
-            first_trail_stop = entry_price - first_lock_distance
+            first_trail_stop = first_trail_lock_stop(entry_price, first_lock_distance, "SELL")
             if price_at_or_below(low, first_trail_stop) and lower_stop(first_trail_stop, stop):
                 stop = first_trail_stop
                 stop_reason = "FIRST_TRAIL_SL"

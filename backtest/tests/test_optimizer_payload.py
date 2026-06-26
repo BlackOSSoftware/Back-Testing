@@ -102,6 +102,31 @@ class OptimizerPayloadTest(unittest.TestCase):
 
         self.assertEqual(list(optimizer_top_metric_indices(metrics, 1, 50, "BALANCED", 10)), [1])
 
+    def test_optimizer_allows_signed_first_trail_lock_values(self) -> None:
+        payload = optimizer_payload(
+            {
+                "data_source": "MT5",
+                "symbol": "TEST",
+                "from_date": DAY.isoformat(),
+                "to_date": DAY.isoformat(),
+                "entry_timeframes": ["M1"],
+                "trail_timeframes": ["M1"],
+                "entry_patterns": ["BOTH"],
+                "range_start_values": ["06:30"],
+                "range_duration_values": ["60"],
+                "entry_cutoff_values": ["19:00"],
+                "session_end_values": ["21:30"],
+                "entry_buffer_values": ["0.25"],
+                "stop_points_values": ["300"],
+                "first_trail_profit_values": ["600"],
+                "first_trail_lock_values": ["-300", "300"],
+                "second_trail_profit_values": ["2000"],
+                "max_combinations": "4",
+            }
+        )
+
+        self.assertEqual(payload["parameters"]["first_trail_lock_loss"], [-300.0, 300.0])
+
     def test_optimizer_results_are_saved_and_loaded_from_sqlite(self) -> None:
         payload = optimizer_payload(
             {

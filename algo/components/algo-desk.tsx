@@ -223,6 +223,17 @@ function levelFrom(entry: number, side: string, distance: number, direction: "pr
   return null;
 }
 
+function firstTrailLockStop(entry: number, side: string, lockDistance: number) {
+  const effectiveLock = Math.max(lockDistance, 0);
+  if (side === "BUY") return entry + effectiveLock;
+  if (side === "SELL") return entry - effectiveLock;
+  return null;
+}
+
+function firstTrailLockNote(lockDistance: number) {
+  return lockDistance > 0 ? `SL lock: +${numberText(lockDistance)} points` : "SL lock: break-even";
+}
+
 function liveExitPrice(side: string, quote?: LiveQuote) {
   if (!quote) return null;
   if (side === "BUY") return toNumber(quote.bid) ?? toNumber(quote.last);
@@ -252,7 +263,7 @@ function buildTrailPlan(strategy: Strategy, signal: Signal, trade?: LogRow, quot
   }
 
   const firstTrigger = levelFrom(entry, side, strategy.first_trail_profit, "profit");
-  const firstStop = levelFrom(entry, side, strategy.first_trail_lock_loss, "loss");
+  const firstStop = firstTrailLockStop(entry, side, strategy.first_trail_lock_loss);
   const secondTrigger = levelFrom(entry, side, strategy.first_trail_profit + strategy.second_trail_profit, "profit");
   const move = lastClose === null ? null : side === "BUY" ? lastClose - entry : entry - lastClose;
   const firstHit = move !== null && move >= strategy.first_trail_profit;
@@ -955,7 +966,7 @@ function DashboardView({
               value={trailPlan.firstHit ? "Yes" : "Waiting"}
               note="Trail SL starts after first target"
             />
-            <PlanMetric label="Trail SL After First Target" value={numberText(trailPlan.firstStop)} note={`SL lock: ${numberText(selectedStrategy.first_trail_lock_loss)} points`} />
+            <PlanMetric label="Trail SL After First Target" value={numberText(trailPlan.firstStop)} note={firstTrailLockNote(selectedStrategy.first_trail_lock_loss)} />
             <PlanMetric
               label="Second Target Price"
               value={numberText(trailPlan.secondTrigger)}

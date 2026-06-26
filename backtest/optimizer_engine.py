@@ -427,6 +427,7 @@ def _evaluate_kernel(
         stop_distance = entry_price * stop_points / 100.0 if stop_points_unit == 1 else stop_points
         first_profit_distance = entry_price * first_trail_profit / 100.0 if first_trail_profit_unit == 1 else first_trail_profit
         first_lock_distance = entry_price * first_trail_lock_loss / 100.0 if first_trail_lock_loss_unit == 1 else first_trail_lock_loss
+        effective_first_lock_distance = first_lock_distance if first_lock_distance > 0.0 else 0.0
         second_profit_distance = entry_price * second_trail_profit / 100.0 if second_trail_profit_unit == 1 else second_trail_profit
         stop = entry_price - stop_distance if side == 1 else entry_price + stop_distance
         exit_price = closes[end - 1]
@@ -441,7 +442,7 @@ def _evaluate_kernel(
                     exit_price = stop
                     break
                 if highs[idx] + eps >= entry_price + first_profit_distance:
-                    candidate = entry_price + first_lock_distance
+                    candidate = entry_price + effective_first_lock_distance
                     if highs[idx] + eps >= candidate and candidate > stop + eps:
                         stop = candidate
                 if highs[idx] + eps >= entry_price + second_profit_distance and not second_trail_active:
@@ -458,7 +459,7 @@ def _evaluate_kernel(
                     exit_price = stop
                     break
                 if lows[idx] <= entry_price - first_profit_distance + eps:
-                    candidate = entry_price - first_lock_distance
+                    candidate = entry_price - effective_first_lock_distance
                     if lows[idx] <= candidate + eps and candidate < stop - eps:
                         stop = candidate
                 if lows[idx] <= entry_price - second_profit_distance + eps and not second_trail_active:
