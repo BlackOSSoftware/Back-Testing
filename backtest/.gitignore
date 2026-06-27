@@ -15,9 +15,6 @@ env/
 backtest/cache/
 backtest/results/
 backtest/instance/
-cache/
-results/
-instance/
 algo/instance/
 algo/.next/
 algo/node_modules/
@@ -26,31 +23,5 @@ algo/*.tsbuildinfo
 backtest/report_data.js
 report_data.js
 
-# Node / frontend generated files
-node_modules/
-.next/
-out/
-dist/
-build/
-coverage/
-
-# Environment / local config
-.env
-.env.*
-!.env.example
-!.env.*.example
-
-# IDE / OS
-.vscode/
-.idea/
-.DS_Store
-Thumbs.db
-
-# Temporary files
-tmp/
-temp/
-
 *.log
 *.xlsx
-*.sqlite3
-*.db
