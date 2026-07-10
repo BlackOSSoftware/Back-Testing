@@ -43,24 +43,30 @@ TIMEFRAMES = {
 
 
 DEFAULT_STRATEGY = {
-    "name": "XAUUSD M5 breakout",
+    "name": "BTCUSD# M5 breakout",
     "data_source": "MT5",
-    "symbol": "XAUUSD",
+    "symbol": "BTCUSD#",
     "timeframe": "M5",
     "trail_timeframe": "M5",
     "entry_pattern": "BOTH",
-    "range_start": "08:30",
+    "from_date": "2026-06-01",
+    "to_date": "2026-06-30",
+    "range_start": "08:15",
     "range_end": "09:30",
     "session_start": "09:30",
     "entry_cutoff": "18:00",
     "session_end": "19:30",
-    "entry_buffer_pct": 0.25,
+    "entry_buffer_pct": 0.05,
     "entry_buffer_points": 0.0,
-    "stop_points": 500.0,
-    "first_trail_profit": 700.0,
+    "stop_points": 400.0,
+    "stop_points_unit": "POINTS",
+    "first_trail_profit": 400.0,
+    "first_trail_profit_unit": "POINTS",
     "first_trail_lock_loss": 200.0,
+    "first_trail_lock_loss_unit": "POINTS",
     "second_trail_profit": 700.0,
-    "volume": 0.01,
+    "second_trail_profit_unit": "POINTS",
+    "volume": 1.0,
     "target_points": 0.0,
     "max_trades_per_day": 1,
     "max_open_positions": 1,
@@ -78,6 +84,20 @@ def now_ist() -> datetime:
 
 def parse_time(value: str) -> time:
     return datetime.strptime(str(value), "%H:%M").time()
+
+
+def normalize_distance_unit(value: Any) -> str:
+    text = str(value or "POINTS").strip().upper()
+    if text in {"POINT", "POINTS", "PTS"}:
+        return "POINTS"
+    if text in {"PERCENT", "PERCENTAGE", "PCT", "%"}:
+        return "PERCENT"
+    raise ValueError("Distance unit must be POINTS or PERCENT.")
+
+
+def distance_to_points(value: float, unit: str, entry_price: float) -> float:
+    amount = float(value)
+    return float(entry_price) * amount / 100.0 if normalize_distance_unit(unit) == "PERCENT" else amount
 
 
 def output(data: dict[str, Any]) -> None:
@@ -113,6 +133,8 @@ def connect() -> sqlite3.Connection:
             timeframe TEXT NOT NULL,
             trail_timeframe TEXT NOT NULL,
             entry_pattern TEXT NOT NULL,
+            from_date TEXT NOT NULL DEFAULT '2026-06-01',
+            to_date TEXT NOT NULL DEFAULT '2026-06-30',
             range_start TEXT NOT NULL,
             range_end TEXT NOT NULL,
             session_start TEXT NOT NULL,
@@ -121,9 +143,13 @@ def connect() -> sqlite3.Connection:
             entry_buffer_pct REAL NOT NULL,
             entry_buffer_points REAL NOT NULL DEFAULT 0,
             stop_points REAL NOT NULL,
+            stop_points_unit TEXT NOT NULL DEFAULT 'POINTS',
             first_trail_profit REAL NOT NULL,
+            first_trail_profit_unit TEXT NOT NULL DEFAULT 'POINTS',
             first_trail_lock_loss REAL NOT NULL,
+            first_trail_lock_loss_unit TEXT NOT NULL DEFAULT 'POINTS',
             second_trail_profit REAL NOT NULL,
+            second_trail_profit_unit TEXT NOT NULL DEFAULT 'POINTS',
             volume REAL NOT NULL,
             target_points REAL NOT NULL DEFAULT 0,
             max_trades_per_day INTEGER NOT NULL DEFAULT 1,
@@ -157,6 +183,12 @@ def connect() -> sqlite3.Connection:
         CREATE INDEX IF NOT EXISTS idx_trade_log_time ON trade_log(created_at DESC);
         """
     )
+    ensure_column(connection, "strategies", "from_date", "TEXT NOT NULL DEFAULT '2026-06-01'")
+    ensure_column(connection, "strategies", "to_date", "TEXT NOT NULL DEFAULT '2026-06-30'")
+    ensure_column(connection, "strategies", "stop_points_unit", "TEXT NOT NULL DEFAULT 'POINTS'")
+    ensure_column(connection, "strategies", "first_trail_profit_unit", "TEXT NOT NULL DEFAULT 'POINTS'")
+    ensure_column(connection, "strategies", "first_trail_lock_loss_unit", "TEXT NOT NULL DEFAULT 'POINTS'")
+    ensure_column(connection, "strategies", "second_trail_profit_unit", "TEXT NOT NULL DEFAULT 'POINTS'")
     ensure_column(connection, "strategies", "live_trading_enabled", "INTEGER NOT NULL DEFAULT 0")
     connection.execute(
         """
@@ -182,6 +214,8 @@ def row_to_strategy(row: sqlite3.Row) -> dict[str, Any]:
         "timeframe": row["timeframe"],
         "trail_timeframe": row["trail_timeframe"],
         "entry_pattern": row["entry_pattern"],
+        "from_date": row["from_date"],
+        "to_date": row["to_date"],
         "range_start": row["range_start"],
         "range_end": row["range_end"],
         "session_start": row["session_start"],
@@ -190,9 +224,13 @@ def row_to_strategy(row: sqlite3.Row) -> dict[str, Any]:
         "entry_buffer_pct": row["entry_buffer_pct"],
         "entry_buffer_points": row["entry_buffer_points"],
         "stop_points": row["stop_points"],
+        "stop_points_unit": row["stop_points_unit"],
         "first_trail_profit": row["first_trail_profit"],
+        "first_trail_profit_unit": row["first_trail_profit_unit"],
         "first_trail_lock_loss": row["first_trail_lock_loss"],
+        "first_trail_lock_loss_unit": row["first_trail_lock_loss_unit"],
         "second_trail_profit": row["second_trail_profit"],
+        "second_trail_profit_unit": row["second_trail_profit_unit"],
         "volume": row["volume"],
         "target_points": row["target_points"],
         "max_trades_per_day": row["max_trades_per_day"],
@@ -217,16 +255,25 @@ def normalize_strategy(values: dict[str, Any], existing_id: str | None = None) -
     entry_pattern = str(merged.get("entry_pattern", "BOTH")).upper()
     if entry_pattern not in {"BOTH", "BUY_ONLY", "SELL_ONLY"}:
         raise ValueError("Entry pattern must be BOTH, BUY_ONLY or SELL_ONLY.")
+    from_date = datetime.strptime(str(merged.get("from_date")), "%Y-%m-%d").date()
+    to_date = datetime.strptime(str(merged.get("to_date")), "%Y-%m-%d").date()
+    if from_date > to_date:
+        raise ValueError("From date cannot be after To date.")
     for key in ("range_start", "range_end", "session_start", "entry_cutoff", "session_end"):
         parse_time(str(merged[key]))
+    volume = float(merged.get("volume", 0.01))
+    if volume <= 0:
+        raise ValueError("Qty / lot size must be greater than zero.")
     return {
         "id": strategy_id,
         "name": str(merged.get("name") or f"{symbol} {timeframe} breakout").strip(),
-        "data_source": str(merged.get("data_source", "MT5")).upper(),
+        "data_source": "MT5",
         "symbol": symbol,
         "timeframe": timeframe,
         "trail_timeframe": trail_timeframe,
         "entry_pattern": entry_pattern,
+        "from_date": from_date.isoformat(),
+        "to_date": to_date.isoformat(),
         "range_start": str(merged["range_start"]),
         "range_end": str(merged["range_end"]),
         "session_start": str(merged["session_start"]),
@@ -235,10 +282,14 @@ def normalize_strategy(values: dict[str, Any], existing_id: str | None = None) -
         "entry_buffer_pct": float(merged.get("entry_buffer_pct", 0.25)),
         "entry_buffer_points": float(merged.get("entry_buffer_points", 0.0)),
         "stop_points": float(merged.get("stop_points", 500.0)),
+        "stop_points_unit": normalize_distance_unit(merged.get("stop_points_unit")),
         "first_trail_profit": float(merged.get("first_trail_profit", 700.0)),
+        "first_trail_profit_unit": normalize_distance_unit(merged.get("first_trail_profit_unit")),
         "first_trail_lock_loss": float(merged.get("first_trail_lock_loss", 200.0)),
+        "first_trail_lock_loss_unit": normalize_distance_unit(merged.get("first_trail_lock_loss_unit")),
         "second_trail_profit": float(merged.get("second_trail_profit", 700.0)),
-        "volume": float(merged.get("volume", 0.01)),
+        "second_trail_profit_unit": normalize_distance_unit(merged.get("second_trail_profit_unit")),
+        "volume": volume,
         "target_points": float(merged.get("target_points", 0.0)),
         "max_trades_per_day": int(merged.get("max_trades_per_day", 1)),
         "max_open_positions": int(merged.get("max_open_positions", 1)),
@@ -252,16 +303,18 @@ def upsert_strategy(connection: sqlite3.Connection, strategy: dict[str, Any]) ->
         """
         INSERT INTO strategies (
             id, name, data_source, symbol, timeframe, trail_timeframe, entry_pattern,
-            range_start, range_end, session_start, entry_cutoff, session_end,
-            entry_buffer_pct, entry_buffer_points, stop_points, first_trail_profit,
-            first_trail_lock_loss, second_trail_profit, volume, target_points,
+            from_date, to_date, range_start, range_end, session_start, entry_cutoff, session_end,
+            entry_buffer_pct, entry_buffer_points, stop_points, stop_points_unit,
+            first_trail_profit, first_trail_profit_unit, first_trail_lock_loss,
+            first_trail_lock_loss_unit, second_trail_profit, second_trail_profit_unit, volume, target_points,
             max_trades_per_day, max_open_positions, live_trading_enabled, updated_at
         )
         VALUES (
             :id, :name, :data_source, :symbol, :timeframe, :trail_timeframe, :entry_pattern,
-            :range_start, :range_end, :session_start, :entry_cutoff, :session_end,
-            :entry_buffer_pct, :entry_buffer_points, :stop_points, :first_trail_profit,
-            :first_trail_lock_loss, :second_trail_profit, :volume, :target_points,
+            :from_date, :to_date, :range_start, :range_end, :session_start, :entry_cutoff, :session_end,
+            :entry_buffer_pct, :entry_buffer_points, :stop_points, :stop_points_unit,
+            :first_trail_profit, :first_trail_profit_unit, :first_trail_lock_loss,
+            :first_trail_lock_loss_unit, :second_trail_profit, :second_trail_profit_unit, :volume, :target_points,
             :max_trades_per_day, :max_open_positions, :live_trading_enabled, :updated_at
         )
         ON CONFLICT(id) DO UPDATE SET
@@ -271,6 +324,8 @@ def upsert_strategy(connection: sqlite3.Connection, strategy: dict[str, Any]) ->
             timeframe=excluded.timeframe,
             trail_timeframe=excluded.trail_timeframe,
             entry_pattern=excluded.entry_pattern,
+            from_date=excluded.from_date,
+            to_date=excluded.to_date,
             range_start=excluded.range_start,
             range_end=excluded.range_end,
             session_start=excluded.session_start,
@@ -279,9 +334,13 @@ def upsert_strategy(connection: sqlite3.Connection, strategy: dict[str, Any]) ->
             entry_buffer_pct=excluded.entry_buffer_pct,
             entry_buffer_points=excluded.entry_buffer_points,
             stop_points=excluded.stop_points,
+            stop_points_unit=excluded.stop_points_unit,
             first_trail_profit=excluded.first_trail_profit,
+            first_trail_profit_unit=excluded.first_trail_profit_unit,
             first_trail_lock_loss=excluded.first_trail_lock_loss,
+            first_trail_lock_loss_unit=excluded.first_trail_lock_loss_unit,
             second_trail_profit=excluded.second_trail_profit,
+            second_trail_profit_unit=excluded.second_trail_profit_unit,
             volume=excluded.volume,
             target_points=excluded.target_points,
             max_trades_per_day=excluded.max_trades_per_day,
@@ -604,13 +663,28 @@ def scan_signal(connection: sqlite3.Connection, strategy_id: str | None = None) 
         if not side:
             continue
         entry_reference = buy_trigger if side == "BUY" else sell_trigger
-        stop_loss = entry_reference - strategy["stop_points"] if side == "BUY" else entry_reference + strategy["stop_points"]
-        first_trail_trigger = (
-            entry_reference + strategy["first_trail_profit"]
-            if side == "BUY"
-            else entry_reference - strategy["first_trail_profit"]
+        stop_distance = distance_to_points(strategy["stop_points"], strategy["stop_points_unit"], entry_reference)
+        first_trail_distance = distance_to_points(
+            strategy["first_trail_profit"], strategy["first_trail_profit_unit"], entry_reference
         )
-        first_trail_stop = first_trail_lock_stop(entry_reference, strategy["first_trail_lock_loss"], side)
+        first_lock_distance = distance_to_points(
+            strategy["first_trail_lock_loss"], strategy["first_trail_lock_loss_unit"], entry_reference
+        )
+        second_trail_distance = distance_to_points(
+            strategy["second_trail_profit"], strategy["second_trail_profit_unit"], entry_reference
+        )
+        stop_loss = entry_reference - stop_distance if side == "BUY" else entry_reference + stop_distance
+        first_trail_trigger = (
+            entry_reference + first_trail_distance
+            if side == "BUY"
+            else entry_reference - first_trail_distance
+        )
+        first_trail_stop = first_trail_lock_stop(entry_reference, first_lock_distance, side)
+        second_trail_trigger = (
+            entry_reference + first_trail_distance + second_trail_distance
+            if side == "BUY"
+            else entry_reference - first_trail_distance - second_trail_distance
+        )
         result.update(
             {
                 "status": f"{side} signal",
@@ -620,6 +694,7 @@ def scan_signal(connection: sqlite3.Connection, strategy_id: str | None = None) 
                 "stop_loss": stop_loss,
                 "first_trail_trigger": first_trail_trigger,
                 "first_trail_stop": first_trail_stop,
+                "second_trail_trigger": second_trail_trigger,
                 "trigger_candle_time": candle["time_ist"].isoformat(),
             }
         )
@@ -871,6 +946,7 @@ def execute_mt5_order(
             "message": message,
             "ticket": result_data.get("order") or result_data.get("deal"),
             "retcode": result_data.get("retcode"),
+            "volume": request["volume"],
             "price": price,
             "stop_loss": stop_loss,
             "take_profit": take_profit,

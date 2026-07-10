@@ -8,7 +8,7 @@
     <script src="/vendor/highcharts/highstock.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined" />
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=3" />
   </head>
   <body>
     <div class="app-shell">
@@ -120,6 +120,10 @@
               </select>
             </label>
             <label>
+              <span class="setup-label tone-slate"><i data-lucide="hash"></i>Qty <button class="info-btn" type="button" title="P&L amount points ko is quantity se multiply karke dikhega. Example: 100 points x qty 2 = 200 amount.">?</button></span>
+              <input name="quantity" type="number" value="1" step="0.01" min="0.000001" required />
+            </label>
+            <label>
               <span class="setup-label tone-pink"><i data-lucide="calendar-days"></i>From Date</span>
               <input id="fromDateInput" name="from_date" type="date" required />
             </label>
@@ -129,7 +133,7 @@
             </label>
             <label>
               <span class="setup-label tone-teal"><i data-lucide="clock-3"></i>Range Start IST</span>
-              <input name="range_start" type="time" value="08:30" required />
+              <input name="range_start" type="time" value="08:15" required />
             </label>
             <label>
               <span class="setup-label tone-teal"><i data-lucide="clock-4"></i>Range End IST</span>
@@ -141,20 +145,20 @@
             </label>
             <label>
               <span class="setup-label tone-amber"><i data-lucide="timer-reset"></i>Last Entry Time IST</span>
-              <input name="entry_cutoff" type="time" value="19:00" required />
+              <input name="entry_cutoff" type="time" value="18:00" required />
             </label>
             <label>
               <span class="setup-label tone-red"><i data-lucide="timer-off"></i>Force Exit Time IST</span>
-              <input name="session_end" type="time" value="21:30" required />
+              <input name="session_end" type="time" value="19:30" required />
             </label>
             <label>
               <span class="setup-label tone-blue"><i data-lucide="move-up-right"></i>Entry Buffer % <button class="info-btn" type="button" title="Range high ke upar ya range low ke neeche extra safety gap. Example 0.25 means 0.25 percent.">?</button></span>
-              <input name="entry_buffer_pct" type="number" value="0.02" step="0.01" min="0" />
+              <input name="entry_buffer_pct" type="number" value="0.05" step="0.01" min="0" />
             </label>
             <label>
               <span class="setup-label tone-red"><i data-lucide="shield-alert"></i>Stop Loss <button class="info-btn" type="button" title="Initial SL distance. Points mode uses fixed price distance; percentage mode calculates distance from entry price.">?</button></span>
               <div class="risk-control">
-                <input name="stop_points" type="number" value="10" step="0.01" min="0" />
+                <input name="stop_points" type="number" value="350" step="0.01" min="0" />
                 <select name="stop_points_unit" aria-label="Stop Loss Unit">
                   <option value="POINTS" selected>Pts</option>
                   <option value="PERCENT">%</option>
@@ -164,7 +168,7 @@
             <label>
               <span class="setup-label tone-green"><i data-lucide="target"></i>First Target <button class="info-btn" type="button" title="Is profit distance par first trailing stop active hota hai. Exit nahi hota.">?</button></span>
               <div class="risk-control">
-                <input name="first_trail_profit" type="number" value="10" step="0.01" min="0" />
+                <input name="first_trail_profit" type="number" value="700" step="0.01" min="0" />
                 <select name="first_trail_profit_unit" aria-label="First Target Unit">
                   <option value="POINTS" selected>Pts</option>
                   <option value="PERCENT">%</option>
@@ -172,7 +176,7 @@
               </div>
             </label>
             <label>
-              <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="Positive value profit side lock karegi; negative value first target hit hone ke baad SL ko break-even par rakhegi.">?</button></span>
+              <span class="setup-label tone-indigo"><i data-lucide="lock"></i>First SL Lock <button class="info-btn" type="button" title="Signed offset from entry after first target: +200 locks 200 points profit; -200 allows 200 points loss.">?</button></span>
               <div class="risk-control">
                 <input name="first_trail_lock_loss" type="number" value="0" step="0.01" />
                 <select name="first_trail_lock_loss_unit" aria-label="First SL Lock Unit">
@@ -184,7 +188,7 @@
             <label>
               <span class="setup-label tone-purple"><i data-lucide="flag-triangle-right"></i>Second Target <button class="info-btn" type="button" title="Is profit distance par two-candle exit trail active hota hai.">?</button></span>
               <div class="risk-control">
-                <input name="second_trail_profit" type="number" value="20" step="0.01" min="0" />
+                <input name="second_trail_profit" type="number" value="700" step="0.01" min="0" />
                 <select name="second_trail_profit_unit" aria-label="Second Target Unit">
                   <option value="POINTS" selected>Pts</option>
                   <option value="PERCENT">%</option>
@@ -223,6 +227,10 @@
                 <input id="optimizerSymbolInput" name="symbol" autocomplete="off" placeholder="Search symbol..." required />
                 <div id="optimizerSymbolMenu" class="symbol-menu"></div>
               </div>
+            </label>
+            <label>
+              <span class="setup-label tone-slate"><i data-lucide="hash"></i>Qty</span>
+              <input id="optimizerQuantityInput" name="quantity" type="number" value="1" step="0.01" min="0.000001" required />
             </label>
             <label class="optimizer-picker-label">
               <span>Entry Timeframes</span>
@@ -304,7 +312,7 @@
               </div>
             </label>
             <label>
-              <span>First Trail Lock Values <button class="info-btn" type="button" title="Positive values profit side lock karengi; negative values first target hit hone ke baad break-even lock karengi.">?</button></span>
+              <span>First Trail Lock Values <button class="info-btn" type="button" title="Signed offsets from entry after first target: +200 locks 200 points profit; -200 allows 200 points loss.">?</button></span>
               <div class="risk-control optimizer-risk-control">
                 <input name="first_trail_lock_values" value="300,400,200" placeholder="300,400,200" />
                 <select name="first_trail_lock_loss_unit" aria-label="Optimizer First SL Lock Unit">
@@ -357,6 +365,10 @@
               <i data-lucide="scan-search"></i>
               Start Scan
             </button>
+            <button id="optimizerStopBtn" class="secondary-btn danger-btn optimizer-stop" type="button" hidden>
+              <i data-lucide="square"></i>
+              Stop Scan
+            </button>
           </form>
           <div class="optimizer-note">
             Fast scan engine reuses candles per timeframe and evaluates large parameter batches in optimized numeric loops. Add comma-separated values to broaden the search.
@@ -388,13 +400,14 @@
                   <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="win_rate_pct" type="button">Win Rate <span></span></button></th>
                   <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="total_trades" type="button">Trades <span></span></button></th>
                   <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="net_points" type="button">Net Points <span></span></button></th>
+                  <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="net_amount" type="button">Net Amount <span></span></button></th>
                   <th class="num"><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="avg_points" type="button">Avg / Trade <span></span></button></th>
                   <th><button class="sort-btn optimizer-sort-btn" data-optimizer-sort="settings" type="button">Settings <span></span></button></th>
                   <th></th>
                 </tr>
               </thead>
               <tbody id="optimizerRows">
-                <tr><td class="empty" colspan="9">Start a scan to compare strategy settings.</td></tr>
+                <tr><td class="empty" colspan="10">Start a scan to compare strategy settings.</td></tr>
               </tbody>
             </table>
           </div>
@@ -498,7 +511,18 @@
           <div class="candle-chart-grid">
             <article class="candle-card">
               <div class="candle-card-title">
-                <h3>Entry Candle Chart</h3>
+                <div class="candle-card-heading">
+                  <h3>Entry Candle Chart</h3>
+                  <div id="entryChartOhlc" class="candle-ohlc" aria-live="polite">
+                    <time data-candle-value="time">Hover a candle</time>
+                    <div class="candle-ohlc-values">
+                      <b>O</b><strong data-candle-value="open">-</strong>
+                      <b>H</b><strong data-candle-value="high">-</strong>
+                      <b>L</b><strong data-candle-value="low">-</strong>
+                      <b>C</b><strong data-candle-value="close">-</strong>
+                    </div>
+                  </div>
+                </div>
                 <span id="entryChartTimeframe">-</span>
               </div>
               <div class="chart-shell">
@@ -508,7 +532,18 @@
             </article>
             <article class="candle-card">
               <div class="candle-card-title">
-                <h3>Exit Trail Candle Chart</h3>
+                <div class="candle-card-heading">
+                  <h3>Exit Trail Candle Chart</h3>
+                  <div id="exitChartOhlc" class="candle-ohlc" aria-live="polite">
+                    <time data-candle-value="time">Hover a candle</time>
+                    <div class="candle-ohlc-values">
+                      <b>O</b><strong data-candle-value="open">-</strong>
+                      <b>H</b><strong data-candle-value="high">-</strong>
+                      <b>L</b><strong data-candle-value="low">-</strong>
+                      <b>C</b><strong data-candle-value="close">-</strong>
+                    </div>
+                  </div>
+                </div>
                 <div class="candle-title-actions">
                   <span id="exitChartTimeframe">-</span>
                   <div class="mini-segmented" aria-label="Exit chart candle timeframe">
@@ -547,6 +582,7 @@
                 <tr>
                   <th><button class="sort-btn active" data-sort="trade_date" type="button">Date <span>↑</span></button></th>
                   <th><button class="sort-btn" data-sort="side" type="button">Side <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="quantity" type="button">Qty <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="range_high" type="button">Range High <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="range_low" type="button">Range Low <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="entry_price" type="button">Entry <span></span></button></th>
@@ -556,6 +592,7 @@
                   <th class="num"><button class="sort-btn" data-sort="exit_price" type="button">Exit <span></span></button></th>
                   <th><button class="sort-btn" data-sort="exit_reason" type="button">Exit Rule <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="pnl_points" type="button">P&L <span></span></button></th>
+                  <th class="num"><button class="sort-btn" data-sort="pnl_amount" type="button">Amount <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="mfe_points" type="button">MFE <span></span></button></th>
                   <th class="num"><button class="sort-btn" data-sort="mae_points" type="button">MAE <span></span></button></th>
                 </tr>
@@ -655,6 +692,18 @@
       const unitText = (unit) => String(unit || "POINTS").toUpperCase() === "PERCENT" ? "%" : "pts";
       const riskValueLabel = (value, unit) => unitText(unit) === "%" ? `${fmt(value)}%` : `${fmt(value)} pts`;
       const riskRowLabel = (row, key) => riskValueLabel(row?.[key], row?.[`${key}_unit`]);
+      const qtyValue = (row = null) => {
+        const raw = row ? row.quantity ?? activeOptimizerScan?.scan_config?.quantity ?? report?.config?.quantity : report?.config?.quantity;
+        const number = Number(raw ?? 1);
+        return Number.isFinite(number) && number > 0 ? number : 1;
+      };
+      const amountFromPoints = (points, explicitAmount, quantity = qtyValue()) => {
+        const amount = Number(explicitAmount);
+        if (Number.isFinite(amount)) return amount;
+        const pointValue = Number(points);
+        return Number.isFinite(pointValue) ? pointValue * quantity : 0;
+      };
+      const amountLabel = (value) => `${fmt(value)} amt`;
       const tone = (value) => (Number(value) >= 0 ? "positive" : "negative");
       const timeOnly = (value) => value ? new Date(value).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false }) : "-";
       const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({
@@ -733,11 +782,14 @@
         const optimizerSource = document.getElementById("optimizerDataSourceInput");
         const setupSymbol = document.getElementById("symbolInput");
         const optimizerSymbol = document.getElementById("optimizerSymbolInput");
+        const setupQuantity = document.querySelector('#backtestForm [name="quantity"]');
+        const optimizerQuantity = document.getElementById("optimizerQuantityInput");
         if (setupSource && optimizerSource) {
           optimizerSource.innerHTML = setupSource.innerHTML;
           optimizerSource.value = setupSource.value || optimizerSource.value;
         }
         if (setupSymbol && optimizerSymbol) optimizerSymbol.value = setupSymbol.value || optimizerSymbol.value;
+        if (setupQuantity && optimizerQuantity) optimizerQuantity.value = setupQuantity.value || optimizerQuantity.value || "1";
       }
 
       function syncSetupMarketFromOptimizer() {
@@ -745,12 +797,15 @@
         const optimizerSource = document.getElementById("optimizerDataSourceInput");
         const setupSymbol = document.getElementById("symbolInput");
         const optimizerSymbol = document.getElementById("optimizerSymbolInput");
+        const setupQuantity = document.querySelector('#backtestForm [name="quantity"]');
+        const optimizerQuantity = document.getElementById("optimizerQuantityInput");
         if (setupSource && optimizerSource && optimizerSource.value && setupSource.value !== optimizerSource.value) {
           setupSource.value = optimizerSource.value;
           updateTimeframeOptions("M5", "M15");
           fillOptimizerTimeframes();
         }
         if (setupSymbol && optimizerSymbol) setupSymbol.value = optimizerSymbol.value;
+        if (setupQuantity && optimizerQuantity && optimizerQuantity.value) setupQuantity.value = optimizerQuantity.value;
         updateSetupFieldWidths();
       }
 
@@ -804,28 +859,29 @@
       function fillFormFromReport() {
         if (!report?.config) return;
         const cfg = report.config;
-        document.getElementById("dataSourceInput").value = cfg.data_source || "DELTA";
-        updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M15");
+        document.getElementById("dataSourceInput").value = cfg.data_source || "MT5";
+        updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M5");
         fillOptimizerTimeframes();
-        document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD";
+        document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD#";
         syncOptimizerMarketFromSetup();
         document.getElementById("timeframeInput").value = cfg.timeframe || "M5";
-        document.getElementById("trailTimeframeInput").value = cfg.trail_timeframe || cfg.timeframe || "M15";
+        document.getElementById("trailTimeframeInput").value = cfg.trail_timeframe || cfg.timeframe || "M5";
         document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
         document.getElementById("fromDateInput").value = cfg.from_date || "";
         document.getElementById("toDateInput").value = cfg.to_date || "";
         const values = {
-          range_start: cfg.range_start || "08:30",
+          range_start: cfg.range_start || "08:15",
           range_end: cfg.range_end || "09:30",
           session_start: cfg.session_start || "09:30",
           entry_cutoff: cfg.entry_cutoff || "18:00",
           session_end: cfg.session_end || "19:30",
-          entry_buffer_pct: cfg.entry_buffer_pct ?? 0.25,
-          stop_points: cfg.stop_points ?? 400,
+          quantity: cfg.quantity ?? 1,
+          entry_buffer_pct: cfg.entry_buffer_pct ?? 0.05,
+          stop_points: cfg.stop_points ?? 350,
           stop_points_unit: cfg.stop_points_unit || "POINTS",
-          first_trail_profit: cfg.first_trail_profit ?? 400,
+          first_trail_profit: cfg.first_trail_profit ?? 700,
           first_trail_profit_unit: cfg.first_trail_profit_unit || "POINTS",
-          first_trail_lock_loss: cfg.first_trail_lock_loss ?? 300,
+          first_trail_lock_loss: cfg.first_trail_lock_loss ?? 0,
           first_trail_lock_loss_unit: cfg.first_trail_lock_loss_unit || "POINTS",
           second_trail_profit: cfg.second_trail_profit ?? 700,
           second_trail_profit_unit: cfg.second_trail_profit_unit || "POINTS",
@@ -834,6 +890,7 @@
           const input = document.querySelector(`#backtestForm [name="${name}"]`);
           if (input) input.value = value;
         });
+        syncOptimizerMarketFromSetup();
         updateSetupFieldWidths();
       }
 
@@ -877,18 +934,18 @@
           document.getElementById("fromDateInput").value = defaults.from_date;
           document.getElementById("toDateInput").value = defaults.to_date;
           const cfg = defaults.defaults || {};
-          document.getElementById("dataSourceInput").value = cfg.data_source || "DELTA";
-          document.getElementById("optimizerDataSourceInput").value = cfg.data_source || "DELTA";
-          document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD";
-          document.getElementById("optimizerSymbolInput").value = cfg.symbol || "BTCUSD";
-          updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M15");
+          document.getElementById("dataSourceInput").value = cfg.data_source || "MT5";
+          document.getElementById("optimizerDataSourceInput").value = cfg.data_source || "MT5";
+          document.getElementById("symbolInput").value = cfg.symbol || "BTCUSD#";
+          document.getElementById("optimizerSymbolInput").value = cfg.symbol || "BTCUSD#";
+          updateTimeframeOptions(cfg.timeframe || "M5", cfg.trail_timeframe || cfg.timeframe || "M5");
           document.getElementById("entryPatternInput").value = cfg.entry_pattern || "BOTH";
           Object.entries(cfg).forEach(([name, value]) => {
             const input = document.querySelector(`#backtestForm [name="${name}"]`);
             if (input) input.value = value;
           });
         } else {
-          updateTimeframeOptions("M5", "M15");
+          updateTimeframeOptions("M5", "M5");
         }
         fillOptimizerTimeframes();
         syncOptimizerMarketFromSetup();
@@ -901,7 +958,7 @@
         document.getElementById("timeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
         document.getElementById("trailTimeframeInput").innerHTML = timeframes.map((item) => `<option>${item}</option>`).join("");
         document.getElementById("timeframeInput").value = timeframes.includes(entryValue) ? entryValue : "M5";
-        document.getElementById("trailTimeframeInput").value = timeframes.includes(trailValue) ? trailValue : "M15";
+        document.getElementById("trailTimeframeInput").value = timeframes.includes(trailValue) ? trailValue : "M5";
         updateSetupFieldWidths();
       }
 
@@ -980,8 +1037,8 @@
         const scanDefaults = source === "MT5" ? timeframes : ["M5", "M10", "M15", "M30", "H1"];
         const entryDefaults = (source === "MT5" ? timeframes.filter((item) => item !== "M4") : scanDefaults).filter((item) => timeframes.includes(item));
         const trailDefaults = scanDefaults.filter((item) => timeframes.includes(item));
-        const setupEntryCutoff = document.querySelector('#backtestForm [name="entry_cutoff"]')?.value || "19:00";
-        const setupSessionEnd = document.querySelector('#backtestForm [name="session_end"]')?.value || "21:30";
+        const setupEntryCutoff = document.querySelector('#backtestForm [name="entry_cutoff"]')?.value || "18:00";
+        const setupSessionEnd = document.querySelector('#backtestForm [name="session_end"]')?.value || "19:30";
         const optimizerCutoffOptions = Array.from(new Set(["15:00", "16:00", "17:00", "18:00", setupEntryCutoff])).sort();
         const optimizerExitOptions = Array.from(new Set(["18:00", "18:30", "19:00", "19:30", "20:00", setupSessionEnd])).sort();
         renderValuePicker("optimizerEntryTimeframePicker", "optimizerEntryTimeframes", timeframes, entryDefaults);
@@ -1168,13 +1225,14 @@
       function applyStrategyValues(values) {
         if (!values) return;
         document.getElementById("dataSourceInput").value = values.data_source || "DELTA";
-        updateTimeframeOptions(values.timeframe || "M5", values.trail_timeframe || values.timeframe || "M15");
+        updateTimeframeOptions(values.timeframe || "M5", values.trail_timeframe || values.timeframe || "M5");
         fillOptimizerTimeframes();
         const mergedValues = {
           stop_points_unit: "POINTS",
           first_trail_profit_unit: "POINTS",
           first_trail_lock_loss_unit: "POINTS",
           second_trail_profit_unit: "POINTS",
+          quantity: 1,
           ...values,
         };
         Object.entries(mergedValues).forEach(([name, value]) => {
@@ -1354,6 +1412,13 @@
         pill.dataset.state = state;
       }
 
+      function setOptimizerRunState(isRunning, isStopping = false) {
+        document.getElementById("optimizerRunBtn").disabled = isRunning;
+        const stopButton = document.getElementById("optimizerStopBtn");
+        stopButton.hidden = !isRunning;
+        stopButton.disabled = isStopping;
+      }
+
       function optimizerPayload() {
         syncSetupMarketFromOptimizer();
         const scanValues = Object.fromEntries(new FormData(document.getElementById("optimizerForm")).entries());
@@ -1366,7 +1431,7 @@
       }
 
       function optimizerSettingsText(row) {
-        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${riskRowLabel(row, "stop_points")} | Trail ${riskRowLabel(row, "first_trail_profit")}/${riskRowLabel(row, "first_trail_lock_loss")} | 2nd ${riskValueLabel(row.second_trail_profit ?? 700, row.second_trail_profit_unit)}`;
+        return `${row.range_start || "08:30"}-${row.range_end || "09:30"} | Cut ${row.entry_cutoff || "18:00"} | Exit ${row.session_end || "19:30"} | Qty ${fmt(qtyValue(row))} | Buffer ${fmt(row.entry_buffer_pct)}% | Stop Loss ${riskRowLabel(row, "stop_points")} | Trail ${riskRowLabel(row, "first_trail_profit")}/${riskRowLabel(row, "first_trail_lock_loss")} | 2nd ${riskValueLabel(row.second_trail_profit ?? 700, row.second_trail_profit_unit)}`;
       }
 
       function optimizerAveragePoints(row) {
@@ -1374,11 +1439,16 @@
         return trades ? Number(row.net_points || 0) / trades : 0;
       }
 
+      function optimizerNetAmount(row) {
+        return amountFromPoints(row.net_points, row.net_amount, qtyValue(row));
+      }
+
       function optimizerSortValue(row, key) {
         if (key === "timeframe") return `${row.timeframe || ""}/${row.trail_timeframe || ""}`;
         if (key === "settings") return optimizerSettingsText(row);
         if (key === "entry_pattern") return row.entry_pattern || "BOTH";
         if (key === "avg_points") return optimizerAveragePoints(row);
+        if (key === "net_amount") return optimizerNetAmount(row);
         if (["rank", "win_rate_pct", "total_trades", "net_points"].includes(key)) {
           const value = Number(row[key]);
           return Number.isFinite(value) ? value : -Infinity;
@@ -1415,11 +1485,19 @@
           ? "Running"
           : job.status === "interrupted"
             ? "Partial saved"
+            : job.status === "cancelled"
+              ? "Stopped"
             : job.target_found ? "Target found" : "Target not reached";
+        const resultClass = job.target_found
+          ? "positive"
+          : job.status === "running" || job.status === "queued" || job.status === "cancelled"
+            ? ""
+            : "negative";
         summary.innerHTML = `
-          <div><span>Result</span><strong class="${job.target_found ? "positive" : job.status === "running" || job.status === "queued" ? "" : "negative"}">${outcome}</strong></div>
+          <div><span>Result</span><strong class="${resultClass}">${outcome}</strong></div>
           <div><span>Tested</span><strong>${job.tested} / ${job.total}</strong></div>
           <div><span>Target</span><strong>${fmt(job.target_win_rate)}% / min ${job.minimum_trades} trades</strong></div>
+          <div><span>Qty</span><strong>${fmt(job.scan_config?.quantity ?? document.getElementById("optimizerQuantityInput")?.value ?? 1)}</strong></div>
           <div><span>Elapsed</span><strong>${fmt(job.elapsed_seconds)} sec</strong></div>
         `;
         document.getElementById("optimizerRows").innerHTML = optimizerResults.length
@@ -1431,6 +1509,7 @@
                 <td class="num ${Number(row.win_rate_pct) >= Number(job.target_win_rate) ? "positive" : ""}"><b>${fmt(row.win_rate_pct)}%</b></td>
                 <td class="num">${row.total_trades}<small>${row.wins}W / ${row.losses}L</small></td>
                 <td class="num ${tone(row.net_points)}"><b>${fmt(row.net_points)}</b></td>
+                <td class="num ${tone(optimizerNetAmount(row))}"><b>${amountLabel(optimizerNetAmount(row))}</b><small>Qty ${fmt(qtyValue(row))}</small></td>
                 <td class="num ${tone(optimizerAveragePoints(row))}">${fmt(optimizerAveragePoints(row))} pts</td>
                 <td class="optimizer-settings">
                   ${optimizerSettingsText(row)}
@@ -1438,7 +1517,7 @@
                 <td><button class="ghost-btn use-optimizer-btn" data-optimizer-index="${index}" type="button">Use & Run</button></td>
               </tr>
             `).join("")
-          : `<tr><td class="empty" colspan="9">No scan result available.</td></tr>`;
+          : `<tr><td class="empty" colspan="10">No scan result available.</td></tr>`;
         const count = Number(job.result_count ?? optimizerResults.length);
         const meta = document.getElementById("optimizerResultMeta");
         const fullCsv = Boolean(job.save_full_csv || job.scan_config?.save_full_csv);
@@ -1480,13 +1559,16 @@
         const scan = await apiJson(`/api/optimizer/scans/${encodeURIComponent(scanId)}?${new URLSearchParams(scope).toString()}`);
         renderOptimizerResults(scan);
         if (scan.status === "running" || scan.status === "queued") {
-          document.getElementById("optimizerRunBtn").disabled = true;
+          setOptimizerRunState(true, Boolean(scan.cancel_requested));
           document.getElementById("optimizerProgress").hidden = false;
           setOptimizerStatus("Running scan restored", "loading");
           pollOptimizerJob(scan.scan_id);
         } else {
-          document.getElementById("optimizerRunBtn").disabled = false;
-          setOptimizerStatus(scan.status === "interrupted" ? "Saved partial result" : scan.target_found ? "Saved target result" : "Saved scan loaded", scan.target_found ? "ready" : "error");
+          setOptimizerRunState(false);
+          setOptimizerStatus(
+            scan.status === "cancelled" ? "Stopped scan loaded" : scan.status === "interrupted" ? "Saved partial result" : scan.target_found ? "Saved target result" : "Saved scan loaded",
+            scan.status === "cancelled" || scan.target_found ? "ready" : "error"
+          );
         }
       }
 
@@ -1522,12 +1604,14 @@
           document.getElementById("optimizerResultMeta").textContent = "";
           document.getElementById("optimizerExportBtn").hidden = true;
           document.getElementById("optimizerRows").innerHTML =
-            `<tr><td class="empty" colspan="9">Start a scan to compare strategy settings.</td></tr>`;
+            `<tr><td class="empty" colspan="10">Start a scan to compare strategy settings.</td></tr>`;
+          setOptimizerRunState(false);
           setOptimizerStatus("Ready", "ready");
         }
       }
 
       async function pollOptimizerJob(jobId) {
+        optimizerPollTimer = null;
         try {
           const job = await apiJson(`/api/optimizer/jobs/${jobId}`);
           const progress = Number(job.progress_pct || 0);
@@ -1536,7 +1620,7 @@
           document.getElementById("optimizerProgressBar").style.width = `${Math.min(progress, 100)}%`;
           if (job.results?.length) renderOptimizerResults(job);
           if (job.status === "completed") {
-            document.getElementById("optimizerRunBtn").disabled = false;
+            setOptimizerRunState(false);
             setOptimizerStatus(job.target_found ? "Target found" : "Completed", job.target_found ? "ready" : "error");
             renderOptimizerResults(job);
             if (job.target_found && job.results?.[0]) {
@@ -1547,23 +1631,31 @@
             await loadLatestOptimizer(job.scan_id, { preserveCurrent: true, openSelected: false });
             return;
           }
+          if (job.status === "cancelled") {
+            setOptimizerRunState(false);
+            setOptimizerStatus("Scan stopped", "ready");
+            renderOptimizerResults(job);
+            await loadLatestOptimizer(job.scan_id, { preserveCurrent: true, openSelected: false });
+            return;
+          }
           if (job.status === "error") {
-            document.getElementById("optimizerRunBtn").disabled = false;
+            setOptimizerRunState(false);
             setOptimizerStatus(job.message, "error");
             return;
           }
+          setOptimizerRunState(true, Boolean(job.cancel_requested));
           optimizerPollTimer = window.setTimeout(() => pollOptimizerJob(jobId), 750);
         } catch (error) {
-          document.getElementById("optimizerRunBtn").disabled = false;
+          setOptimizerRunState(false);
           setOptimizerStatus(error.message, "error");
         }
       }
 
       async function startOptimizer(event) {
         event.preventDefault();
-        const btn = document.getElementById("optimizerRunBtn");
         if (optimizerPollTimer) window.clearTimeout(optimizerPollTimer);
-        btn.disabled = true;
+        optimizerPollTimer = null;
+        setOptimizerRunState(true);
         setOptimizerStatus("Preparing scan...", "loading");
         document.getElementById("optimizerProgress").hidden = false;
         document.getElementById("optimizerProgressBar").style.width = "0%";
@@ -1588,11 +1680,33 @@
             result_sort: document.querySelector('[name="result_sort"]').value || "BALANCED",
             save_full_csv: document.querySelector('[name="save_full_csv"]').checked,
             result_count: 0,
+            scan_config: {
+              quantity: Number(document.getElementById("optimizerQuantityInput")?.value || 1),
+              symbol: (document.getElementById("optimizerSymbolInput").value || document.getElementById("symbolInput").value || "").trim(),
+            },
             results: [],
           });
           pollOptimizerJob(job.job_id || job.scan_id);
         } catch (error) {
-          btn.disabled = false;
+          setOptimizerRunState(false);
+          setOptimizerStatus(error.message, "error");
+        }
+      }
+
+      async function stopOptimizer() {
+        const jobId = activeOptimizerScan?.scan_id || document.getElementById("optimizerScanSelect").value;
+        if (!jobId) return;
+        setOptimizerRunState(true, true);
+        setOptimizerStatus("Stopping scan...", "loading");
+        document.getElementById("optimizerProgressText").textContent = "Stopping scan...";
+        try {
+          const job = await apiJson(`/api/optimizer/jobs/${encodeURIComponent(jobId)}/stop`, { method: "POST" });
+          activeOptimizerScan = { ...(activeOptimizerScan || {}), ...job };
+          renderOptimizerResults(activeOptimizerScan);
+          if (optimizerPollTimer) window.clearTimeout(optimizerPollTimer);
+          optimizerPollTimer = window.setTimeout(() => pollOptimizerJob(jobId), 300);
+        } catch (error) {
+          setOptimizerRunState(true, false);
           setOptimizerStatus(error.message, "error");
         }
       }
@@ -1607,6 +1721,7 @@
           session_start: row.session_start || row.range_end || "09:30",
           entry_cutoff: row.entry_cutoff || "18:00",
           session_end: row.session_end || "19:30",
+          quantity: row.quantity ?? activeOptimizerScan?.scan_config?.quantity ?? 1,
           entry_buffer_pct: row.entry_buffer_pct,
           stop_points: row.stop_points,
           stop_points_unit: row.stop_points_unit || "POINTS",
@@ -1621,6 +1736,7 @@
           const input = document.querySelector(`#backtestForm [name="${name}"]`);
           if (input) input.value = value;
         });
+        syncOptimizerMarketFromSetup();
         if (options.scroll !== false) {
           document.getElementById("setup").scrollIntoView({ behavior: "smooth", block: "start" });
         }
@@ -1633,11 +1749,12 @@
         if (!report) return;
         const secondTarget = report.config.second_trail_profit ?? 700;
         const secondTargetLabel = riskValueLabel(secondTarget, report.config.second_trail_profit_unit);
+        const quantityLabel = fmt(report.config.quantity ?? 1);
         document.getElementById("sideSymbol").textContent = report.config.symbol;
-        document.getElementById("sideMeta").textContent = `${report.config.data_source || "MT5"} | Entry ${report.config.timeframe} | +${secondTargetLabel} Trail ${report.config.trail_timeframe || report.config.timeframe} | ${report.config.range} | ${report.config.session}`;
+        document.getElementById("sideMeta").textContent = `${report.config.data_source || "MT5"} | Qty ${quantityLabel} | Entry ${report.config.timeframe} | +${secondTargetLabel} Trail ${report.config.trail_timeframe || report.config.timeframe} | ${report.config.range} | ${report.config.session}`;
         if (report.config.data_from_date && report.config.data_to_date) {
           document.getElementById("dataNoteText").textContent =
-            `${report.config.data_source === "DELTA" ? "Delta cached online" : "Local MT5"} data used: ${report.config.data_from_date} to ${report.config.data_to_date}. Entry ${report.config.timeframe}; +${secondTargetLabel} exit trail ${report.config.trail_timeframe || report.config.timeframe}.`;
+            `${report.config.data_source === "DELTA" ? "Delta cached online" : "Local MT5"} data used: ${report.config.data_from_date} to ${report.config.data_to_date}. Qty ${quantityLabel}; Entry ${report.config.timeframe}; +${secondTargetLabel} exit trail ${report.config.trail_timeframe || report.config.timeframe}.`;
         }
       }
 
@@ -1656,11 +1773,15 @@
 
       function renderMetrics() {
         const stats = report?.stats || {};
+        const netAmount = amountFromPoints(stats.net_points, stats.net_amount, qtyValue());
+        const avgAmount = amountFromPoints(stats.avg_points, stats.avg_amount, qtyValue());
         const cards = [
           ["Net Points", stats.net_points, "trending-up"],
+          ["Net Amount", amountLabel(netAmount), "circle-dollar-sign"],
           ["Trades", stats.total_trades, "list-checks"],
           ["Win Rate", `${fmt(stats.win_rate_pct)}%`, "target"],
           ["Avg Profit / Trade", `${fmt(stats.avg_points)} pts`, "activity"],
+          ["Avg Amount / Trade", amountLabel(avgAmount), "activity"],
           ["Max Profit", stats.max_profit_points, "arrow-up-right"],
           ["Max Loss", stats.max_loss_points, "arrow-down-right"],
         ];
@@ -1678,8 +1799,8 @@
         const items = [
           ["Profit Trades", stats.wins || 0, "positive"],
           ["Loss Trades", stats.losses || 0, "negative"],
-          ["Buy Trades", `${stats.buy_trades || 0} / ${fmt(stats.buy_net_points)} pts`, tone(stats.buy_net_points || 0)],
-          ["Sell Trades", `${stats.sell_trades || 0} / ${fmt(stats.sell_net_points)} pts`, tone(stats.sell_net_points || 0)],
+          ["Buy Trades", `${stats.buy_trades || 0} / ${fmt(stats.buy_net_points)} pts / ${amountLabel(amountFromPoints(stats.buy_net_points, stats.buy_net_amount, qtyValue()))}`, tone(stats.buy_net_points || 0)],
+          ["Sell Trades", `${stats.sell_trades || 0} / ${fmt(stats.sell_net_points)} pts / ${amountLabel(amountFromPoints(stats.sell_net_points, stats.sell_net_amount, qtyValue()))}`, tone(stats.sell_net_points || 0)],
           ["Avg Win", `${fmt(stats.avg_win_points)} pts`, "positive"],
           ["Avg Loss", `${fmt(stats.avg_loss_points)} pts`, "negative"],
           ["Initial SL Exits", stats.initial_sl_exits ?? 0, "negative"],
@@ -1727,9 +1848,13 @@
         const ratios = [
           ["Risk Reward", stats.risk_reward_ratio ?? "-"],
           ["Avg Points", `${fmt(stats.avg_points)} pts`],
+          ["Avg Amount", amountLabel(amountFromPoints(stats.avg_points, stats.avg_amount, qtyValue()))],
           ["Drawdown", `${fmt(stats.max_drawdown_points)} pts`],
+          ["Drawdown Amount", amountLabel(amountFromPoints(stats.max_drawdown_points, stats.max_drawdown_amount, qtyValue()))],
           ["Gross Profit", `${fmt(stats.gross_profit_points)} pts`],
+          ["Gross Profit Amount", amountLabel(amountFromPoints(stats.gross_profit_points, stats.gross_profit_amount, qtyValue()))],
           ["Gross Loss", `${fmt(stats.gross_loss_points)} pts`],
+          ["Gross Loss Amount", amountLabel(amountFromPoints(stats.gross_loss_points, stats.gross_loss_amount, qtyValue()))],
           ["One Trade/Day", "Enabled"],
         ];
         document.getElementById("ratioGrid").innerHTML = ratios.map(([label, value]) => `
@@ -1751,6 +1876,8 @@
       function sortValue(trade, key) {
         if (key === "trade_date") return new Date(trade.entry_time || trade.trade_date).getTime();
         if (key === "side" || key === "exit_reason") return String(trade[key] || "");
+        if (key === "quantity") return qtyValue(trade);
+        if (key === "pnl_amount") return amountFromPoints(trade.pnl_points, trade.pnl_amount, qtyValue(trade));
         return Number(trade[key] ?? 0);
       }
 
@@ -1826,6 +1953,7 @@
               <tr class="${selectedTrade === trade ? "selected-row" : ""}" data-trade-index="${report.trades.indexOf(trade)}">
                 <td><b>${trade.trade_date}</b><small>${timeOnly(trade.entry_time)} to ${timeOnly(trade.exit_time)}</small></td>
                 <td><span class="side ${trade.side.toLowerCase()}">${trade.side}</span></td>
+                <td class="num">${fmt(qtyValue(trade))}</td>
                 <td class="num">${fmt(trade.range_high)}</td>
                 <td class="num">${fmt(trade.range_low)}</td>
                 <td class="num">${fmt(trade.entry_price)}</td>
@@ -1835,11 +1963,12 @@
                 <td class="num">${fmt(trade.exit_price)}</td>
                 <td><span class="reason">${exitLabel(trade.exit_reason)}</span></td>
                 <td class="num ${tone(trade.pnl_points)}"><b>${pointsPctCell(trade.pnl_points, trade.pnl_pct)}</b></td>
+                <td class="num ${tone(amountFromPoints(trade.pnl_points, trade.pnl_amount, qtyValue(trade)))}"><b>${amountLabel(amountFromPoints(trade.pnl_points, trade.pnl_amount, qtyValue(trade)))}</b></td>
                 <td class="num">${pointsPctCell(trade.mfe_points, trade.mfe_pct)}</td>
                 <td class="num">${pointsPctCell(trade.mae_points, trade.mae_pct)}</td>
               </tr>
             `).join("")
-          : `<tr><td class="empty" colspan="13">Run backtest to load records.</td></tr>`;
+          : `<tr><td class="empty" colspan="15">Run backtest to load records.</td></tr>`;
       }
 
       function renderAll() {
@@ -2030,6 +2159,7 @@
         const negative = data.filter((item) => item.points < 0).length;
         const items = [
           ["Net", `${fmt(net)} pts`, tone(net)],
+          ["Net Amount", amountLabel(net * qtyValue()), tone(net)],
           ["Best", `${best.label} / ${fmt(best.points)} pts`, "positive"],
           ["Worst", `${worst.label} / ${fmt(worst.points)} pts`, "negative"],
           ["Bars", `${data.length} total`],
@@ -2239,27 +2369,7 @@
             ],
           },
           tooltip: {
-            split: false,
-            shared: true,
-            outside: false,
-            followPointer: false,
-            followTouchMove: false,
-            borderColor: "#cbd5e1",
-            backgroundColor: "rgba(255,255,255,0.96)",
-            xDateFormat: "%A, %d %b %Y %H:%M IST",
-            valueDecimals: 2,
-            positioner: function (labelWidth, labelHeight, point) {
-              const chart = this.chart;
-              return {
-                x: chart.plotLeft + chart.plotWidth - labelWidth - 12,
-                y: chart.plotTop + 10,
-              };
-            },
-            shadow: false,
-            style: {
-              fontSize: "12px",
-              lineHeight: "16px",
-            },
+            enabled: false,
           },
           plotOptions: {
             candlestick: {
@@ -2267,6 +2377,13 @@
               upColor: "#059669",
               lineColor: "#e11d48",
               upLineColor: "#059669",
+              point: {
+                events: {
+                  mouseOver: function () {
+                    updateChartOhlcHeader(chartRequest.kind, this);
+                  },
+                },
+              },
             },
             series: {
               turboThreshold: 0,
@@ -2295,6 +2412,8 @@
         } else {
           exitCandleChart = chart;
         }
+        const latestPoint = chart.get("ohlc")?.points?.at(-1);
+        if (latestPoint) updateChartOhlcHeader(chartRequest.kind, latestPoint);
         const focusStart = chartMode === "window"
           ? istDateTimeMs(currentChartWindow().from, report.config.range_start || "08:30") - 60 * 60 * 1000
           : rangeStartTime - 60 * 60 * 1000;
@@ -2311,6 +2430,35 @@
             false
           );
         }
+      }
+
+      function updateChartOhlcHeader(kind, point) {
+        const header = document.getElementById(kind === "entry" ? "entryChartOhlc" : "exitChartOhlc");
+        if (!header || !point) return;
+        const setValue = (field, value) => {
+          const target = header.querySelector(`[data-candle-value="${field}"]`);
+          if (target) target.textContent = value;
+        };
+        const timestamp = Number(point.x);
+        const timeText = Number.isFinite(timestamp)
+          ? new Intl.DateTimeFormat("en-GB", {
+              timeZone: "Asia/Kolkata",
+              day: "2-digit",
+              month: "short",
+              hour: "2-digit",
+              minute: "2-digit",
+              hour12: false,
+            }).format(new Date(timestamp)).replace(",", "") + " IST"
+          : "Selected candle";
+        const priceText = (value) => Number(value).toLocaleString("en-IN", {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+        setValue("time", timeText);
+        setValue("open", priceText(point.open));
+        setValue("high", priceText(point.high));
+        setValue("low", priceText(point.low));
+        setValue("close", priceText(point.close));
       }
 
       function verifiedMarkersForChart(chartRequest, candles) {
@@ -2528,6 +2676,7 @@
         setValuePickerItems("optimizerSessionEndPicker", "optimizerSessionEnds", hourlyTimes());
       });
       document.getElementById("optimizerForm").addEventListener("submit", startOptimizer);
+      document.getElementById("optimizerStopBtn").addEventListener("click", stopOptimizer);
       document.getElementById("optimizerScanSelect").addEventListener("change", (event) => {
         if (event.target.value) openOptimizerScan(event.target.value);
       });
@@ -2704,7 +2853,7 @@
         loadLatestOptimizer();
       });
       document.getElementById("dataSourceInput").addEventListener("change", async () => {
-        updateTimeframeOptions("M5", "M15");
+        updateTimeframeOptions("M5", "M5");
         fillOptimizerTimeframes();
         document.getElementById("optimizerDataSourceInput").value = document.getElementById("dataSourceInput").value;
         setMarketSymbol("");
@@ -2715,7 +2864,7 @@
       });
       document.getElementById("optimizerDataSourceInput").addEventListener("change", async () => {
         document.getElementById("dataSourceInput").value = document.getElementById("optimizerDataSourceInput").value;
-        updateTimeframeOptions("M5", "M15");
+        updateTimeframeOptions("M5", "M5");
         fillOptimizerTimeframes();
         setMarketSymbol("");
         availableSymbols = [];

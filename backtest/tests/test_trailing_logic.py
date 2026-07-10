@@ -15,6 +15,7 @@ from backtest.backtest_mt5 import (  # noqa: E402
     IST,
     backtest,
     current_and_previous_high,
+    first_trail_lock_stop,
     manage_buy_trade,
     manage_sell_trade,
     price_at_or_above,
@@ -116,6 +117,32 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertEqual(result[7], "2026-05-15T11:00:00+05:30")
         self.assertEqual(result[8], 4590.16)
 
+    def test_force_exit_uses_candle_open_without_processing_future_prices(self) -> None:
+        execution = candle_frame(
+            [
+                ("10:00", 100.0, 101.0, 99.0, 100.0),
+                ("10:01", 105.0, 150.0, 50.0, 70.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            session_end=time(10, 1),
+            stop_points=10.0,
+            first_trail_profit=20.0,
+            second_trail_profit=40.0,
+        )
+
+        buy = manage_buy_trade(execution, execution, 0, 100.0, config)
+        sell = manage_sell_trade(execution, execution, 0, 100.0, config)
+
+        self.assertEqual(buy[0], "2026-05-15T10:01:00+05:30")
+        self.assertEqual(buy[1], 105.0)
+        self.assertEqual(buy[2], "FORCE_EXIT")
+        self.assertEqual(sell[1], 105.0)
+        self.assertEqual(sell[2], "FORCE_EXIT")
+
     def test_optimizer_context_uses_same_closed_candle_rule(self) -> None:
         trail = candle_frame(
             [
@@ -181,7 +208,13 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertEqual(result[2], "FIRST_TRAIL_SL")
         self.assertEqual(result[6], 102.0)
 
-    def test_buy_first_trail_lock_supports_profit_and_breakeven_modes(self) -> None:
+    def test_first_trail_lock_uses_signed_entry_offset_for_each_side(self) -> None:
+        self.assertEqual(first_trail_lock_stop(1000.0, 200.0, "BUY"), 1200.0)
+        self.assertEqual(first_trail_lock_stop(1000.0, -200.0, "BUY"), 800.0)
+        self.assertEqual(first_trail_lock_stop(1000.0, 200.0, "SELL"), 800.0)
+        self.assertEqual(first_trail_lock_stop(1000.0, -200.0, "SELL"), 1200.0)
+
+    def test_buy_first_trail_lock_supports_profit_and_loss_offsets(self) -> None:
         execution = candle_frame(
             [
                 ("10:00", 1000.0, 1600.0, 999.0, 1500.0),
@@ -199,17 +232,17 @@ class TrailingStopLogicTest(unittest.TestCase):
         }
 
         profit_lock = BacktestConfig(**common, first_trail_lock_loss=300.0)
-        breakeven_lock = BacktestConfig(**common, first_trail_lock_loss=-300.0)
+        loss_lock = BacktestConfig(**common, first_trail_lock_loss=-200.0)
 
         profit_result = manage_buy_trade(execution, execution, 0, 1000.0, profit_lock)
-        breakeven_result = manage_buy_trade(execution, execution, 0, 1000.0, breakeven_lock)
+        loss_result = manage_buy_trade(execution, execution, 0, 1000.0, loss_lock)
 
         self.assertEqual(profit_result[1], 1300.0)
         self.assertEqual(profit_result[2], "FIRST_TRAIL_SL")
         self.assertEqual(profit_result[6], 1300.0)
-        self.assertEqual(breakeven_result[1], 1000.0)
-        self.assertEqual(breakeven_result[2], "FIRST_TRAIL_SL")
-        self.assertEqual(breakeven_result[6], 1000.0)
+        self.assertEqual(loss_result[1], 800.0)
+        self.assertEqual(loss_result[2], "FIRST_TRAIL_SL")
+        self.assertEqual(loss_result[6], 800.0)
 
     def test_backtest_rows_include_points_and_percent_distances(self) -> None:
         frame = candle_frame(
@@ -229,7 +262,7 @@ class TrailingStopLogicTest(unittest.TestCase):
             range_end=time(9, 30),
             session_start=time(9, 30),
             entry_cutoff=time(9, 30),
-            session_end=time(9, 31),
+            session_end=time(9, 32),
             entry_buffer_pct=0.0,
             stop_points=10.0,
             stop_points_unit="PERCENT",
@@ -238,6 +271,7 @@ class TrailingStopLogicTest(unittest.TestCase):
             first_trail_lock_loss=0.0,
             second_trail_profit=80.0,
             second_trail_profit_unit="PERCENT",
+            quantity=2.0,
         )
 
         trades = backtest(frame, config, frame, frame)
@@ -247,6 +281,8 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertEqual(trades[0].stop_distance_points, 10.0)
         self.assertEqual(trades[0].stop_distance_pct, 10.0)
         self.assertEqual(trades[0].pnl_points, -10.0)
+        self.assertEqual(trades[0].quantity, 2.0)
+        self.assertEqual(trades[0].pnl_amount, -20.0)
         self.assertEqual(trades[0].pnl_pct, -10.0)
 
     def test_first_trail_lock_does_not_move_to_unreached_price(self) -> None:
@@ -286,7 +322,7 @@ class TrailingStopLogicTest(unittest.TestCase):
             highs=np.asarray([200.0, 201.0], dtype=np.float64),
             lows=np.asarray([195.0, 179.0], dtype=np.float64),
             closes=np.asarray([200.0, 180.0], dtype=np.float64),
-            at_session_end=np.asarray([False, True], dtype=np.bool_),
+            at_session_end=np.asarray([False, False], dtype=np.bool_),
         )
         context = ScanContext(
             layout=layout,
@@ -309,6 +345,31 @@ class TrailingStopLogicTest(unittest.TestCase):
 
         self.assertEqual(stats["total_trades"], 1)
         self.assertEqual(stats["net_points"], -20.0)
+
+    def test_optimizer_force_exit_uses_open_before_candle_range(self) -> None:
+        layout = EntryLayout(
+            day_starts=np.asarray([0], dtype=np.int64),
+            day_ends=np.asarray([2], dtype=np.int64),
+            cutoff_ends=np.asarray([1], dtype=np.int64),
+            range_highs=np.asarray([100.0], dtype=np.float64),
+            range_lows=np.asarray([90.0], dtype=np.float64),
+            times_ns=np.asarray([candle_time("09:30").value, candle_time("09:31").value], dtype=np.int64),
+            opens=np.asarray([100.0, 105.0], dtype=np.float64),
+            highs=np.asarray([101.0, 200.0], dtype=np.float64),
+            lows=np.asarray([99.0, 0.0], dtype=np.float64),
+            closes=np.asarray([100.0, 150.0], dtype=np.float64),
+            at_session_end=np.asarray([False, True], dtype=np.bool_),
+        )
+        context = ScanContext(
+            layout=layout,
+            trail_lows=np.asarray([np.nan, np.nan], dtype=np.float64),
+            trail_highs=np.asarray([np.nan, np.nan], dtype=np.float64),
+        )
+
+        stats = evaluate_scan(context, 0.0, 10.0, 50.0, 0.0, 80.0, side_filter=1)
+
+        self.assertEqual(stats["total_trades"], 1)
+        self.assertEqual(stats["net_points"], 5.0)
 
     def test_optimizer_first_lock_does_not_create_unreached_profit(self) -> None:
         layout = EntryLayout(
@@ -343,7 +404,7 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertEqual(stats["total_trades"], 1)
         self.assertEqual(stats["net_points"], 0.0)
 
-    def test_optimizer_negative_first_lock_moves_to_breakeven_after_target(self) -> None:
+    def test_optimizer_negative_first_lock_keeps_signed_loss_offset(self) -> None:
         layout = EntryLayout(
             day_starts=np.asarray([0], dtype=np.int64),
             day_ends=np.asarray([3], dtype=np.int64),
@@ -371,13 +432,13 @@ class TrailingStopLogicTest(unittest.TestCase):
             0.0,
             300.0,
             600.0,
-            -300.0,
+            -200.0,
             2000.0,
             side_filter=1,
         )
 
         self.assertEqual(stats["total_trades"], 1)
-        self.assertEqual(stats["net_points"], 0.0)
+        self.assertEqual(stats["net_points"], -200.0)
 
 
 if __name__ == "__main__":

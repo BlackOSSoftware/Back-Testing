@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import re
+import ssl
 from datetime import date, datetime, time, timedelta
 from pathlib import Path
+from urllib.error import URLError
 from urllib.parse import urlencode, quote
 from urllib.request import Request, urlopen
 
@@ -71,14 +74,43 @@ def fetch_source_rates(config: BacktestConfig) -> pd.DataFrame:
     return fetch_delta_rates(config)
 
 
+def _delta_ssl_context() -> ssl.SSLContext:
+    if os.getenv("DELTA_SSL_NO_VERIFY", "").strip().lower() in {"1", "true", "yes", "on"}:
+        return ssl._create_unverified_context()
+    try:
+        import certifi
+    except ImportError:
+        return ssl.create_default_context()
+    return ssl.create_default_context(cafile=certifi.where())
+
+
+def _is_certificate_error(exc: BaseException) -> bool:
+    reason = getattr(exc, "reason", None)
+    text = str(exc).lower()
+    return (
+        isinstance(exc, ssl.SSLError)
+        or isinstance(reason, ssl.SSLCertVerificationError)
+        or "certificate_verify_failed" in text
+        or "certificate verify failed" in text
+    )
+
+
 def _delta_json(path: str, params: dict | None = None) -> dict:
     suffix = f"?{urlencode(params)}" if params else ""
     request = Request(
         f"{DELTA_BASE_URL}{path}{suffix}",
         headers={"Accept": "application/json", "User-Agent": "MT5-Lab-Backtest/1.0"},
     )
-    with urlopen(request, timeout=30) as response:
-        return json.loads(response.read().decode("utf-8"))
+    try:
+        with urlopen(request, timeout=30, context=_delta_ssl_context()) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except (ssl.SSLError, URLError) as exc:
+        if _is_certificate_error(exc):
+            raise RuntimeError(
+                "Delta Exchange SSL certificate verify failed. Update/install certifi, or set "
+                "DELTA_SSL_NO_VERIFY=1 only on a trusted local machine."
+            ) from exc
+        raise
 
 
 def delta_symbols() -> list[str]:

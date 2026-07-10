@@ -404,6 +404,8 @@ def _evaluate_kernel(
         side = 0
         entry_idx = -1
         for idx in range(start, cutoff_ends[day]):
+            if at_session_end[idx]:
+                break
             buy_hit = highs[idx] + eps >= buy_trigger
             sell_hit = lows[idx] <= sell_trigger + eps
             if side_filter == 1:
@@ -427,12 +429,16 @@ def _evaluate_kernel(
         stop_distance = entry_price * stop_points / 100.0 if stop_points_unit == 1 else stop_points
         first_profit_distance = entry_price * first_trail_profit / 100.0 if first_trail_profit_unit == 1 else first_trail_profit
         first_lock_distance = entry_price * first_trail_lock_loss / 100.0 if first_trail_lock_loss_unit == 1 else first_trail_lock_loss
-        effective_first_lock_distance = first_lock_distance if first_lock_distance > 0.0 else 0.0
         second_profit_distance = entry_price * second_trail_profit / 100.0 if second_trail_profit_unit == 1 else second_trail_profit
         stop = entry_price - stop_distance if side == 1 else entry_price + stop_distance
         exit_price = closes[end - 1]
         second_trail_active = False
         for idx in range(entry_idx, end):
+            # Session-end candles are timestamped at their open. Exit before
+            # consuming that candle's future high/low/close values.
+            if at_session_end[idx]:
+                exit_price = opens[idx]
+                break
             if side == 1:
                 if second_trail_active:
                     candidate = trail_lows[idx]
@@ -442,7 +448,7 @@ def _evaluate_kernel(
                     exit_price = stop
                     break
                 if highs[idx] + eps >= entry_price + first_profit_distance:
-                    candidate = entry_price + effective_first_lock_distance
+                    candidate = entry_price + first_lock_distance
                     if highs[idx] + eps >= candidate and candidate > stop + eps:
                         stop = candidate
                 if highs[idx] + eps >= entry_price + second_profit_distance and not second_trail_active:
@@ -459,7 +465,7 @@ def _evaluate_kernel(
                     exit_price = stop
                     break
                 if lows[idx] <= entry_price - first_profit_distance + eps:
-                    candidate = entry_price - effective_first_lock_distance
+                    candidate = entry_price - first_lock_distance
                     if lows[idx] <= candidate + eps and candidate < stop - eps:
                         stop = candidate
                 if lows[idx] <= entry_price - second_profit_distance + eps and not second_trail_active:
@@ -467,9 +473,6 @@ def _evaluate_kernel(
                     candidate = trail_highs[idx]
                     if not np.isnan(candidate) and candidate < stop - eps:
                         stop = candidate
-            if at_session_end[idx]:
-                exit_price = closes[idx]
-                break
         pnl = round(exit_price - entry_price, 2) if side == 1 else round(entry_price - exit_price, 2)
         total += 1
         running += pnl

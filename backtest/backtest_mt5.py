@@ -82,6 +82,7 @@ class Trade:
     trade_date: str
     symbol: str
     side: str
+    quantity: float
     range_high: float
     range_low: float
     trigger_price: float
@@ -96,10 +97,13 @@ class Trade:
     exit_price: float
     exit_reason: str
     pnl_points: float
+    pnl_amount: float
     pnl_pct: float
     mfe_points: float
+    mfe_amount: float
     mfe_pct: float
     mae_points: float
+    mae_amount: float
     mae_pct: float
     stop_distance_points: float
     stop_distance_pct: float
@@ -134,6 +138,7 @@ class BacktestConfig:
     first_trail_profit_unit: str = "POINTS"
     first_trail_lock_loss_unit: str = "POINTS"
     second_trail_profit_unit: str = "POINTS"
+    quantity: float = 1.0
     data_from_date: date | None = None
     data_to_date: date | None = None
 
@@ -142,6 +147,9 @@ class BacktestConfig:
         self.first_trail_profit_unit = normalize_distance_unit(self.first_trail_profit_unit)
         self.first_trail_lock_loss_unit = normalize_distance_unit(self.first_trail_lock_loss_unit)
         self.second_trail_profit_unit = normalize_distance_unit(self.second_trail_profit_unit)
+        self.quantity = float(self.quantity)
+        if self.quantity <= 0:
+            raise ValueError("Quantity must be greater than zero.")
 
     def stop_distance_points(self, entry_price: float) -> float:
         return distance_to_points(self.stop_points, self.stop_points_unit, entry_price)
@@ -270,8 +278,8 @@ def lower_stop(candidate: float, current: float) -> bool:
 
 
 def first_trail_lock_stop(entry_price: float, lock_distance: float, side: str) -> float:
-    effective_lock = max(float(lock_distance), 0.0)
-    return entry_price + effective_lock if side == "BUY" else entry_price - effective_lock
+    signed_lock = float(lock_distance)
+    return entry_price + signed_lock if side == "BUY" else entry_price - signed_lock
 
 
 def current_and_previous_low(candles: pd.DataFrame, candle_time: datetime, timeframe: str) -> float | None:
@@ -353,10 +361,18 @@ def manage_buy_trade(
 
     for idx in range(start_idx, len(candles)):
         row = candles.iloc[idx]
+        open_price = float(row["open"])
+        candle_time = row["time_ist"]
+
+        # Candle timestamps are candle-open times. At the configured force-exit
+        # instant only the open is known; its high/low/close are future data.
+        if candle_time.time() >= config.session_end:
+            mfe = max(mfe, open_price - entry_price)
+            mae = min(mae, open_price - entry_price)
+            return candle_time.isoformat(), open_price, "FORCE_EXIT", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
+
         high = float(row["high"])
         low = float(row["low"])
-        close = float(row["close"])
-        candle_time = row["time_ist"]
 
         mfe = max(mfe, high - entry_price)
         mae = min(mae, low - entry_price)
@@ -389,9 +405,6 @@ def manage_buy_trade(
                 two_candle_trail_time = candle_time.isoformat()
                 two_candle_trail_sl = stop
 
-        if candle_time.time() >= config.session_end:
-            return candle_time.isoformat(), close, "FORCE_EXIT", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
-
     last = candles.iloc[-1]
     return last["time_ist"].isoformat(), float(last["close"]), "DATA_END", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
@@ -419,10 +432,18 @@ def manage_sell_trade(
 
     for idx in range(start_idx, len(candles)):
         row = candles.iloc[idx]
+        open_price = float(row["open"])
+        candle_time = row["time_ist"]
+
+        # Candle timestamps are candle-open times. At the configured force-exit
+        # instant only the open is known; its high/low/close are future data.
+        if candle_time.time() >= config.session_end:
+            mfe = max(mfe, entry_price - open_price)
+            mae = min(mae, entry_price - open_price)
+            return candle_time.isoformat(), open_price, "FORCE_EXIT", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
+
         high = float(row["high"])
         low = float(row["low"])
-        close = float(row["close"])
-        candle_time = row["time_ist"]
 
         mfe = max(mfe, entry_price - low)
         mae = min(mae, entry_price - high)
@@ -454,9 +475,6 @@ def manage_sell_trade(
                 stop_reason = "TWO_CANDLE_TRAIL_SL"
                 two_candle_trail_time = candle_time.isoformat()
                 two_candle_trail_sl = stop
-
-        if candle_time.time() >= config.session_end:
-            return candle_time.isoformat(), close, "FORCE_EXIT", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
 
     last = candles.iloc[-1]
     return last["time_ist"].isoformat(), float(last["close"]), "DATA_END", mfe, mae, first_trail_time, first_trail_sl, two_candle_trail_time, two_candle_trail_sl
@@ -494,6 +512,8 @@ def backtest(
         sell_trigger = range_low * (1 - config.entry_buffer_pct)
 
         for idx, row in session_df.iterrows():
+            if row["time_ist"] >= session_end:
+                break
             if row["time_ist"].time() > config.entry_cutoff:
                 break
 
@@ -535,6 +555,7 @@ def backtest(
                     trade_date=trade_date.isoformat(),
                     symbol=config.symbol,
                     side=side,
+                    quantity=round(config.quantity, 6),
                     range_high=round(range_high, 2),
                     range_low=round(range_low, 2),
                     trigger_price=round(trigger, 2),
@@ -549,10 +570,13 @@ def backtest(
                     exit_price=round(exit_price, 2),
                     exit_reason=reason,
                     pnl_points=round(pnl, 2),
+                    pnl_amount=round(pnl * config.quantity, 2),
                     pnl_pct=round(points_to_percent(pnl, entry_price), 4),
                     mfe_points=round(mfe, 2),
+                    mfe_amount=round(mfe * config.quantity, 2),
                     mfe_pct=round(points_to_percent(mfe, entry_price), 4),
                     mae_points=round(mae, 2),
+                    mae_amount=round(mae * config.quantity, 2),
                     mae_pct=round(points_to_percent(mae, entry_price), 4),
                     stop_distance_points=round(stop_distance, 2),
                     stop_distance_pct=round(points_to_percent(stop_distance, entry_price), 4),
@@ -577,6 +601,10 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
     gross_profit = sum(row["pnl_points"] for row in wins)
     gross_loss = sum(row["pnl_points"] for row in losses)
     net = gross_profit + gross_loss
+    quantity = float(config.quantity)
+    gross_profit_amount = gross_profit * quantity
+    gross_loss_amount = gross_loss * quantity
+    net_amount = net * quantity
     buy_rows = [row for row in rows if row["side"] == "BUY"]
     sell_rows = [row for row in rows if row["side"] == "SELL"]
     best_trade = max(rows, key=lambda row: row["pnl_points"], default=None)
@@ -603,7 +631,7 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
         running += row["pnl_points"]
         peak = max(peak, running)
         max_drawdown = min(max_drawdown, running - peak)
-        equity.append({"date": row["trade_date"], "pnl": round(running, 2)})
+        equity.append({"date": row["trade_date"], "pnl": round(running, 2), "amount": round(running * quantity, 2)})
 
     return {
         "config": {
@@ -637,6 +665,7 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
             "first_trail_lock_loss_unit": config.first_trail_lock_loss_unit,
             "second_trail_profit": config.second_trail_profit,
             "second_trail_profit_unit": config.second_trail_profit_unit,
+            "quantity": quantity,
         },
         "stats": {
             "total_trades": total,
@@ -644,20 +673,31 @@ def build_summary(trades: Iterable[Trade], config: BacktestConfig) -> dict:
             "losses": len(losses),
             "win_rate_pct": round((len(wins) / total) * 100, 2) if total else 0.0,
             "gross_profit_points": round(gross_profit, 2),
+            "gross_profit_amount": round(gross_profit_amount, 2),
             "gross_loss_points": round(gross_loss, 2),
+            "gross_loss_amount": round(gross_loss_amount, 2),
             "net_points": round(net, 2),
+            "net_amount": round(net_amount, 2),
             "avg_points": round(net / total, 2) if total else 0.0,
+            "avg_amount": round(net_amount / total, 2) if total else 0.0,
             "profit_factor": round(gross_profit / abs(gross_loss), 2) if gross_loss else None,
             "max_drawdown_points": round(max_drawdown, 2),
+            "max_drawdown_amount": round(max_drawdown * quantity, 2),
             "avg_win_points": round(avg_win, 2),
+            "avg_win_amount": round(avg_win * quantity, 2),
             "avg_loss_points": round(avg_loss, 2),
+            "avg_loss_amount": round(avg_loss * quantity, 2),
             "risk_reward_ratio": round(abs(avg_win / avg_loss), 2) if avg_loss else None,
             "buy_trades": len(buy_rows),
             "sell_trades": len(sell_rows),
             "buy_net_points": round(sum(row["pnl_points"] for row in buy_rows), 2),
+            "buy_net_amount": round(sum(row["pnl_points"] for row in buy_rows) * quantity, 2),
             "sell_net_points": round(sum(row["pnl_points"] for row in sell_rows), 2),
+            "sell_net_amount": round(sum(row["pnl_points"] for row in sell_rows) * quantity, 2),
             "max_profit_points": round(best_trade["pnl_points"], 2) if best_trade else 0.0,
+            "max_profit_amount": round(best_trade["pnl_points"] * quantity, 2) if best_trade else 0.0,
             "max_loss_points": round(worst_trade["pnl_points"], 2) if worst_trade else 0.0,
+            "max_loss_amount": round(worst_trade["pnl_points"] * quantity, 2) if worst_trade else 0.0,
             **exit_counts,
         },
         "equity": equity,
@@ -709,6 +749,7 @@ def main() -> None:
     parser.add_argument("--session-end", default="19:30", type=parse_time, help="Forced exit time for running trades, HH:MM IST.")
     parser.add_argument("--buffer-pct", default=0.25, type=float, help="Entry buffer percent. 0.25 means 0.25 percent.")
     parser.add_argument("--stop-points", default=400.0, type=float, help="Initial stop-loss points.")
+    parser.add_argument("--quantity", default=1.0, type=float, help="Quantity multiplier for amount P/L. Amount = points x quantity.")
     args = parser.parse_args()
 
     config = BacktestConfig(
@@ -724,6 +765,7 @@ def main() -> None:
         session_end=args.session_end,
         entry_buffer_pct=args.buffer_pct / 100,
         stop_points=args.stop_points,
+        quantity=args.quantity,
     )
     df = fetch_rates(config)
     if not df.empty:

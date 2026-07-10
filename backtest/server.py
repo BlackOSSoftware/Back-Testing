@@ -281,7 +281,7 @@ def serialized_saved_data_write(view):
 
 
 def default_dates() -> tuple[str, str]:
-    return "2025-06-01", "2026-05-25"
+    return "2026-06-01", "2026-06-30"
 
 
 def load_latest_summary(source: str = "MT5") -> dict:
@@ -375,6 +375,14 @@ def scan_values(data: dict, key: str, default: list, cast, maximum: int = 12) ->
     if len(parsed) > maximum:
         raise ValueError(f"{key} accepts at most {maximum} values.")
     return parsed
+
+
+def parse_quantity(value, default: float = 1.0) -> float:
+    raw = default if value in {None, ""} else value
+    quantity = float(raw)
+    if quantity <= 0:
+        raise ValueError("Quantity must be greater than zero.")
+    return quantity
 
 
 def scan_entry_patterns(data: dict) -> list[str]:
@@ -518,6 +526,7 @@ def optimizer_payload(data: dict) -> dict:
         "from_date": from_date,
         "to_date": to_date,
         "data_source": source,
+        "quantity": parse_quantity(data.get("quantity", 1.0)),
     }
     time_profiles = scan_time_profiles(data)
     total = (
@@ -552,6 +561,10 @@ def optimizer_payload(data: dict) -> dict:
 
 
 def optimization_row(config: BacktestConfig, stats: dict, qualified: bool, tested: int, entry_pattern: str) -> dict:
+    quantity = float(config.quantity)
+    total_trades = int(stats["total_trades"])
+    net_points = float(stats["net_points"])
+    max_drawdown_points = float(stats["max_drawdown_points"])
     return {
         "rank": int(tested),
         "qualified": bool(qualified),
@@ -572,13 +585,17 @@ def optimization_row(config: BacktestConfig, stats: dict, qualified: bool, teste
         "first_trail_lock_loss_unit": config.first_trail_lock_loss_unit,
         "second_trail_profit": float(config.second_trail_profit),
         "second_trail_profit_unit": config.second_trail_profit_unit,
-        "total_trades": int(stats["total_trades"]),
+        "quantity": quantity,
+        "total_trades": total_trades,
         "wins": int(stats["wins"]),
         "losses": int(stats["losses"]),
         "win_rate_pct": float(stats["win_rate_pct"]),
-        "net_points": float(stats["net_points"]),
+        "net_points": net_points,
+        "net_amount": round(net_points * quantity, 2),
+        "avg_amount": round((net_points / total_trades) * quantity, 2) if total_trades else 0.0,
         "profit_factor": None if stats["profit_factor"] is None else float(stats["profit_factor"]),
-        "max_drawdown_points": float(stats["max_drawdown_points"]),
+        "max_drawdown_points": max_drawdown_points,
+        "max_drawdown_amount": round(max_drawdown_points * quantity, 2),
     }
 
 
@@ -654,6 +671,7 @@ def optimization_row_from_metric(
     entry_tf: str,
     trail_tf: str,
     distance_units: dict,
+    quantity: float,
     parameter_values,
     metric,
     qualified: bool,
@@ -661,6 +679,9 @@ def optimization_row_from_metric(
     entry_pattern: str,
 ) -> dict:
     stats = optimizer_stats_from_metric(metric)
+    total_trades = stats["total_trades"]
+    net_points = float(stats["net_points"])
+    max_drawdown_points = float(stats["max_drawdown_points"])
     return {
         "rank": int(tested),
         "qualified": bool(qualified),
@@ -681,13 +702,17 @@ def optimization_row_from_metric(
         "first_trail_lock_loss_unit": distance_units.get("first_trail_lock_loss_unit", "POINTS"),
         "second_trail_profit": float(parameter_values[4]),
         "second_trail_profit_unit": distance_units.get("second_trail_profit_unit", "POINTS"),
-        "total_trades": stats["total_trades"],
+        "quantity": quantity,
+        "total_trades": total_trades,
         "wins": stats["wins"],
         "losses": stats["losses"],
         "win_rate_pct": stats["win_rate_pct"],
-        "net_points": stats["net_points"],
+        "net_points": net_points,
+        "net_amount": round(net_points * quantity, 2),
+        "avg_amount": round((net_points / total_trades) * quantity, 2) if total_trades else 0.0,
         "profit_factor": stats["profit_factor"],
-        "max_drawdown_points": stats["max_drawdown_points"],
+        "max_drawdown_points": max_drawdown_points,
+        "max_drawdown_amount": round(max_drawdown_points * quantity, 2),
     }
 
 
@@ -732,6 +757,12 @@ def optimizer_rank_key(row: dict, mode: str = "BALANCED") -> tuple:
     if mode == "WIN_POINTS":
         return (qualified, win_rate, net_points, -drawdown, trades)
     return (qualified, win_rate, net_points, trades, profit_factor, -drawdown)
+
+
+def ensure_optimizer_column(connection: sqlite3.Connection, table: str, column: str, declaration: str) -> None:
+    columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in columns:
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
 
 
 def safe_optimizer_part(value: str) -> str:
@@ -809,13 +840,17 @@ def optimizer_db_connection() -> sqlite3.Connection:
             first_trail_lock_loss_unit TEXT,
             second_trail_profit REAL,
             second_trail_profit_unit TEXT,
+            quantity REAL,
             total_trades INTEGER,
             wins INTEGER,
             losses INTEGER,
             win_rate_pct REAL,
             net_points REAL,
+            net_amount REAL,
+            avg_amount REAL,
             profit_factor REAL,
             max_drawdown_points REAL,
+            max_drawdown_amount REAL,
             PRIMARY KEY (source, symbol_key, scan_id, rank),
             FOREIGN KEY (source, symbol_key, scan_id)
                 REFERENCES optimizer_scans(source, symbol_key, scan_id)
@@ -825,6 +860,10 @@ def optimizer_db_connection() -> sqlite3.Connection:
             ON optimizer_scans(source, symbol_key, created_at DESC);
         """
     )
+    ensure_optimizer_column(connection, "optimizer_results", "quantity", "REAL")
+    ensure_optimizer_column(connection, "optimizer_results", "net_amount", "REAL")
+    ensure_optimizer_column(connection, "optimizer_results", "avg_amount", "REAL")
+    ensure_optimizer_column(connection, "optimizer_results", "max_drawdown_amount", "REAL")
     return connection
 
 
@@ -900,13 +939,17 @@ def optimizer_result_from_db_row(row: sqlite3.Row) -> dict:
         "first_trail_lock_loss_unit": row["first_trail_lock_loss_unit"],
         "second_trail_profit": db_float(row["second_trail_profit"]),
         "second_trail_profit_unit": row["second_trail_profit_unit"],
+        "quantity": db_float(row["quantity"], 1.0),
         "total_trades": db_int(row["total_trades"]),
         "wins": db_int(row["wins"]),
         "losses": db_int(row["losses"]),
         "win_rate_pct": db_float(row["win_rate_pct"]),
         "net_points": db_float(row["net_points"]),
+        "net_amount": db_float(row["net_amount"], None),
+        "avg_amount": db_float(row["avg_amount"], None),
         "profit_factor": db_float(row["profit_factor"], None),
         "max_drawdown_points": db_float(row["max_drawdown_points"]),
+        "max_drawdown_amount": db_float(row["max_drawdown_amount"], None),
     }
 
 
@@ -990,10 +1033,11 @@ def save_optimizer_scan_db(scan: dict) -> None:
                         session_end, entry_buffer_pct, stop_points, stop_points_unit,
                         first_trail_profit, first_trail_profit_unit, first_trail_lock_loss,
                         first_trail_lock_loss_unit, second_trail_profit, second_trail_profit_unit,
-                        total_trades, wins, losses, win_rate_pct, net_points, profit_factor,
-                        max_drawdown_points
+                        quantity, total_trades, wins, losses, win_rate_pct, net_points,
+                        net_amount, avg_amount, profit_factor, max_drawdown_points,
+                        max_drawdown_amount
                     )
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         (
@@ -1019,13 +1063,17 @@ def save_optimizer_scan_db(scan: dict) -> None:
                             row.get("first_trail_lock_loss_unit"),
                             db_float(row.get("second_trail_profit")),
                             row.get("second_trail_profit_unit"),
+                            db_float(row.get("quantity"), 1.0),
                             db_int(row.get("total_trades")),
                             db_int(row.get("wins")),
                             db_int(row.get("losses")),
                             db_float(row.get("win_rate_pct")),
                             db_float(row.get("net_points")),
+                            db_float(row.get("net_amount"), None),
+                            db_float(row.get("avg_amount"), None),
                             db_float(row.get("profit_factor"), None),
                             db_float(row.get("max_drawdown_points")),
+                            db_float(row.get("max_drawdown_amount"), None),
                         )
                         for index, row in enumerate(results, start=1)
                     ],
@@ -1129,6 +1177,7 @@ def optimizer_scan_config(payload: dict) -> dict:
         "data_source": common["data_source"],
         "from_date": common["from_date"].isoformat(),
         "to_date": common["to_date"].isoformat(),
+        "quantity": common.get("quantity", 1.0),
         "time_profiles": [
             {
                 "range_start": profile["range_start"].strftime("%H:%M"),
@@ -1285,7 +1334,7 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                     }
                 )
 
-        if changes.get("status") in {"completed", "error"}:
+        if changes.get("status") in {"completed", "cancelled", "error"}:
             with _saved_data_lock:
                 persist()
         else:
@@ -1315,6 +1364,11 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
     def debug_progress(message: str) -> None:
         if debug_enabled:
             update_progress(status="running", message=message)
+
+    def cancel_requested() -> bool:
+        with _optimizer_lock:
+            job = _optimizer_jobs.get(job_id)
+            return bool(job and job.get("cancel_requested"))
 
     def resample_m5_frame(frame, timeframe: str):
         timeframe = timeframe.upper()
@@ -1431,20 +1485,25 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
             message="Loading M5 candles once and building selected scan timeframes..." if use_m5_derived_frames else "Loading candle data and scanning settings...",
         )
         stop_scan = False
+        cancel_scan = cancel_requested()
         next_progress = OPTIMIZER_PROGRESS_EVERY
         next_checkpoint = OPTIMIZER_CHECKPOINT_EVERY
         last_progress = monotonic()
         for profile in payload["time_profiles"]:
-            if stop_scan:
+            if stop_scan or cancel_scan:
                 break
             for entry_pattern in payload["entry_patterns"]:
                 side_filter = OPTIMIZER_ENTRY_PATTERNS[entry_pattern]
-                if stop_scan:
+                if stop_scan or cancel_scan:
                     break
                 for entry_tf in payload["entry_timeframes"]:
-                    if stop_scan:
+                    if stop_scan or cancel_scan:
                         break
                     for trail_tf in payload["trail_timeframes"]:
+                        if cancel_requested():
+                            cancel_scan = True
+                            stop_scan = True
+                            break
                         if tested == 0:
                             update_progress(
                                 tested=tested,
@@ -1454,6 +1513,10 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                             )
                         context = scan_context(entry_tf, trail_tf, profile)
                         for parameter_chunk in optimizer_parameter_chunks(payload["parameters"], OPTIMIZER_CHECKPOINT_BATCH):
+                            if cancel_requested():
+                                cancel_scan = True
+                                stop_scan = True
+                                break
                             metrics = evaluate_scan_batch_metrics(
                                 context,
                                 parameter_chunk,
@@ -1493,6 +1556,7 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                                     entry_tf,
                                     trail_tf,
                                     distance_units,
+                                    float(common.get("quantity", 1.0)),
                                     parameter_chunk[int(local_index)],
                                     metrics[int(local_index)],
                                     bool(qualified_mask[int(local_index)]),
@@ -1543,6 +1607,9 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
                                     csv_started = True
                                 while next_checkpoint <= tested:
                                     next_checkpoint += OPTIMIZER_CHECKPOINT_EVERY
+                            if cancel_requested():
+                                cancel_scan = True
+                                stop_scan = True
                             if stop_scan:
                                 break
                         if stop_scan:
@@ -1550,13 +1617,18 @@ def execute_optimizer(job_id: str, payload: dict) -> None:
             layouts.clear()
             contexts.clear()
         found = target_found
+        cancelled = cancel_scan or cancel_requested()
         final = {
-            "status": "completed",
-            "message": "Target reached." if found else "Scan completed without reaching target.",
+            "status": "cancelled" if cancelled else "completed",
+            "message": "Scan stopped by user. Saved partial results are available."
+            if cancelled
+            else "Target reached." if found else "Scan completed without reaching target.",
             "tested": tested,
             "total": payload["total"],
-            "progress_pct": 100.0 if found and payload["stop_on_target"] else round((tested / payload["total"]) * 100, 1),
-            "stopped_early": found and payload["stop_on_target"] and tested < payload["total"],
+            "progress_pct": round((tested / payload["total"]) * 100, 1)
+            if cancelled
+            else 100.0 if found and payload["stop_on_target"] else round((tested / payload["total"]) * 100, 1),
+            "stopped_early": tested < payload["total"] if cancelled else found and payload["stop_on_target"] and tested < payload["total"],
             "target_found": found,
             "target_win_rate": payload["target_win_rate"],
             "minimum_trades": payload["minimum_trades"],
@@ -1701,21 +1773,22 @@ def defaults():
                 "data_source": "MT5",
                 "timeframe": "M5",
                 "trail_timeframe": "M5",
-                "symbol": "GOLD.i#",
+                "symbol": "BTCUSD#",
                 "entry_pattern": "BOTH",
-                "range_start": "08:30",
+                "range_start": "08:15",
                 "range_end": "09:30",
                 "session_start": "09:30",
-                "entry_cutoff": "19:00",
-                "session_end": "21:30",
-                "entry_buffer_pct": 0.02,
-                "stop_points": 10,
+                "entry_cutoff": "18:00",
+                "session_end": "19:30",
+                "quantity": 1,
+                "entry_buffer_pct": 0.05,
+                "stop_points": 350,
                 "stop_points_unit": "POINTS",
-                "first_trail_profit": 10,
+                "first_trail_profit": 700,
                 "first_trail_profit_unit": "POINTS",
                 "first_trail_lock_loss": 0,
                 "first_trail_lock_loss_unit": "POINTS",
-                "second_trail_profit": 20,
+                "second_trail_profit": 700,
                 "second_trail_profit_unit": "POINTS",
             },
         }
@@ -1890,22 +1963,23 @@ def run_backtest():
             to_date=parse_date(data["to_date"]),
             data_source=source,
             timeframe=str(data.get("timeframe", "M5")).upper(),
-            trail_timeframe=str(data.get("trail_timeframe", "M15")).upper(),
+            trail_timeframe=str(data.get("trail_timeframe", "M5")).upper(),
             entry_pattern=str(data.get("entry_pattern", "BOTH")).upper(),
-            range_start=parse_time(data.get("range_start", "08:30")),
+            range_start=parse_time(data.get("range_start", "08:15")),
             range_end=parse_time(data.get("range_end", "09:30")),
             session_start=parse_time(data.get("session_start", "09:30")),
             entry_cutoff=parse_time(data.get("entry_cutoff", "18:00")),
             session_end=parse_time(data.get("session_end", "19:30")),
-            entry_buffer_pct=float(data.get("entry_buffer_pct", 0.25)) / 100,
-            stop_points=float(data.get("stop_points", 400)),
-            first_trail_profit=float(data.get("first_trail_profit", 400)),
-            first_trail_lock_loss=float(data.get("first_trail_lock_loss", 300)),
+            entry_buffer_pct=float(data.get("entry_buffer_pct", 0.05)) / 100,
+            stop_points=float(data.get("stop_points", 350)),
+            first_trail_profit=float(data.get("first_trail_profit", 700)),
+            first_trail_lock_loss=float(data.get("first_trail_lock_loss", 0)),
             second_trail_profit=float(data.get("second_trail_profit", 700)),
             stop_points_unit=data.get("stop_points_unit", "POINTS"),
             first_trail_profit_unit=data.get("first_trail_profit_unit", "POINTS"),
             first_trail_lock_loss_unit=data.get("first_trail_lock_loss_unit", "POINTS"),
             second_trail_profit_unit=data.get("second_trail_profit_unit", "POINTS"),
+            quantity=parse_quantity(data.get("quantity", 1.0)),
         )
         if not config.symbol:
             raise ValueError("Symbol is required.")
@@ -1993,6 +2067,7 @@ def start_optimizer():
             "symbol": common["symbol"],
             "status": "queued",
             "message": "Scan queued...",
+            "cancel_requested": False,
             "tested": 0,
             "total": payload["total"],
             "progress_pct": 0.0,
@@ -2033,6 +2108,27 @@ def optimizer_job(job_id: str):
         result = dict(job) if job else None
     if result is None:
         return jsonify({"error": "Optimizer scan not found."}), 404
+    return jsonify(result)
+
+
+@app.post("/api/optimizer/jobs/<job_id>/stop")
+@auth_required
+def stop_optimizer_job(job_id: str):
+    if not csrf_is_valid():
+        return jsonify({"error": "Invalid security token."}), 400
+    with _optimizer_lock:
+        job = _optimizer_jobs.get(job_id)
+        if job is None:
+            return jsonify({"error": "Optimizer scan not found."}), 404
+        if job.get("status") in {"queued", "running"}:
+            job.update(
+                {
+                    "cancel_requested": True,
+                    "message": "Stopping scan...",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }
+            )
+        result = dict(job)
     return jsonify(result)
 
 

@@ -122,10 +122,12 @@ class OptimizerPayloadTest(unittest.TestCase):
                 "first_trail_lock_values": ["-300", "300"],
                 "second_trail_profit_values": ["2000"],
                 "max_combinations": "4",
+                "quantity": "2",
             }
         )
 
         self.assertEqual(payload["parameters"]["first_trail_lock_loss"], [-300.0, 300.0])
+        self.assertEqual(payload["common"]["quantity"], 2.0)
 
     def test_optimizer_results_are_saved_and_loaded_from_sqlite(self) -> None:
         payload = optimizer_payload(
@@ -150,6 +152,7 @@ class OptimizerPayloadTest(unittest.TestCase):
                 "target_win_rate": "0",
                 "minimum_trades": "1",
                 "max_combinations": "1",
+                "quantity": "2",
             }
         )
         job = {
@@ -191,13 +194,17 @@ class OptimizerPayloadTest(unittest.TestCase):
             "first_trail_lock_loss_unit": "POINTS",
             "second_trail_profit": 700.0,
             "second_trail_profit_unit": "POINTS",
+            "quantity": 2.0,
             "total_trades": 1,
             "wins": 1,
             "losses": 0,
             "win_rate_pct": 100.0,
             "net_points": 10.0,
+            "net_amount": 20.0,
+            "avg_amount": 20.0,
             "profit_factor": None,
             "max_drawdown_points": 0.0,
+            "max_drawdown_amount": 0.0,
         }
 
         with tempfile.TemporaryDirectory() as temp_dir, patch.object(
@@ -211,8 +218,11 @@ class OptimizerPayloadTest(unittest.TestCase):
         self.assertEqual(len(records), 1)
         self.assertIsNotNone(loaded)
         self.assertEqual(loaded["scan_config"]["engine_version"], server_module.OPTIMIZER_ENGINE_VERSION)
+        self.assertEqual(loaded["scan_config"]["quantity"], 2.0)
         self.assertEqual(loaded["results"][0]["total_trades"], 1)
         self.assertEqual(loaded["results"][0]["net_points"], 10.0)
+        self.assertEqual(loaded["results"][0]["quantity"], 2.0)
+        self.assertEqual(loaded["results"][0]["net_amount"], 20.0)
 
     def test_optimizer_keeps_full_signal_candle_execution_window_after_cutoff(self) -> None:
         signal_h4 = candle_frame(
