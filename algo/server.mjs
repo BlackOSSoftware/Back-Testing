@@ -4,14 +4,20 @@ import { spawn } from "node:child_process";
 import { parse } from "node:url";
 import next from "next";
 import { WebSocket, WebSocketServer } from "ws";
+import { resolvePythonBin } from "./lib/resolve-python.mjs";
 
 const dev = process.env.NODE_ENV !== "production";
-const hostname = process.env.HOST || "127.0.0.1";
+const hostname =
+  process.env.HOST || (dev ? "127.0.0.1" : "0.0.0.0");
 const port = Number(process.env.PORT || 3000);
 const app = next({ dev, hostname, port });
 const handle = app.getRequestHandler();
 const workerPath = path.join(process.cwd(), "python", "algo_worker.py");
-const pythonBin = process.env.ALGO_PYTHON || "python";
+const pythonBin = resolvePythonBin();
+
+console.log(`> Algo Desk starting (${dev ? "development" : "production"})`);
+console.log(`> Python: ${pythonBin}`);
+console.log(`> Preparing Next.js (first start on VPS can take 2-5 minutes, please wait)...`);
 
 function runWorker(command, payload) {
   return new Promise((resolve, reject) => {
@@ -67,12 +73,10 @@ function broadcast(wss, payload) {
 }
 
 async function loadLiveState({ check = false } = {}) {
-  const status = await runWorker("status");
-  if (!check || !status.running || !status.active_strategy_id) return status;
+  if (!check) return runWorker("status");
   try {
     return await runWorker("control", {
       action: "check",
-      strategy_id: status.active_strategy_id,
     });
   } catch {
     return await runWorker("status");
@@ -80,6 +84,7 @@ async function loadLiveState({ check = false } = {}) {
 }
 
 await app.prepare();
+console.log(`> Next.js ready. Binding http://${hostname}:${port}`);
 
 const server = createServer((req, res) => {
   const parsedUrl = parse(req.url || "", true);
@@ -87,15 +92,18 @@ const server = createServer((req, res) => {
 });
 
 const wss = new WebSocketServer({ noServer: true });
-let quoteTimer = null;
-let signalTimer = null;
+const FAST_ACTION_INTERVAL_MS = 100;
+const IDLE_REFRESH_INTERVAL_MS = 2000;
+let liveTimer = null;
 let liveCheckRunning = false;
+let lastKnownRunning = false;
 
 async function publishState(options) {
   if (liveCheckRunning) return;
   liveCheckRunning = true;
   try {
     const state = await loadLiveState(options);
+    lastKnownRunning = Boolean(state?.running);
     broadcast(wss, { type: "state", state });
   } catch (error) {
     broadcast(wss, {
@@ -107,35 +115,34 @@ async function publishState(options) {
   }
 }
 
+function scheduleLiveTick(delay = 0) {
+  if (liveTimer || !wss.clients.size) return;
+  liveTimer = setTimeout(async () => {
+    liveTimer = null;
+    await publishState({ check: lastKnownRunning });
+    scheduleLiveTick(lastKnownRunning ? FAST_ACTION_INTERVAL_MS : IDLE_REFRESH_INTERVAL_MS);
+  }, delay);
+}
+
 function startLiveTimer() {
-  if (!quoteTimer) {
-    quoteTimer = setInterval(() => {
-      void publishState();
-    }, 2000);
-  }
-  if (!signalTimer) {
-    signalTimer = setInterval(() => {
-      void publishState({ check: true });
-    }, 15000);
-  }
+  scheduleLiveTick();
 }
 
 function stopLiveTimerIfIdle() {
   if (wss.clients.size) return;
-  if (quoteTimer) {
-    clearInterval(quoteTimer);
-    quoteTimer = null;
-  }
-  if (signalTimer) {
-    clearInterval(signalTimer);
-    signalTimer = null;
+  if (liveTimer) {
+    clearTimeout(liveTimer);
+    liveTimer = null;
   }
 }
 
 function runImmediateSignalCheck() {
-  setTimeout(() => {
-    void publishState({ check: true });
-  }, 500);
+  lastKnownRunning = true;
+  if (liveTimer) {
+    clearTimeout(liveTimer);
+    liveTimer = null;
+  }
+  scheduleLiveTick();
 }
 
 wss.on("connection", (socket) => {

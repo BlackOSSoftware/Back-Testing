@@ -48,6 +48,9 @@ Thumbs.db
 # Runtime files
 *.pid
 *.seed
+data/
+instance/
+tsconfig.tsbuildinfo
 
 # Results / Generated Data
 results/

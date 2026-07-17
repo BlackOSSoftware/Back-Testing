@@ -7,7 +7,8 @@ export type WorkerResult<T = unknown> = T & {
 };
 
 const workerPath = path.join(process.cwd(), "python", "algo_worker.py");
-const pythonBin = process.env.ALGO_PYTHON || "python";
+const pythonBin =
+  process.env.ALGO_PYTHON || (process.platform === "win32" ? "python" : "python3");
 
 export function runWorker<T>(command: string, payload?: unknown): Promise<WorkerResult<T>> {
   return new Promise((resolve, reject) => {

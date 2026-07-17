@@ -22,7 +22,9 @@ import {
   Search,
   ShieldCheck,
   Settings,
+  ScrollText,
   Target,
+  Terminal,
   TrendingDown,
   TrendingUp,
   XCircle,
@@ -30,7 +32,7 @@ import {
 import type { ReactNode } from "react";
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-type DeskView = "dashboard" | "settings";
+type DeskView = "dashboard" | "settings" | "logs";
 
 type Strategy = {
   id: string;
@@ -60,6 +62,7 @@ type Strategy = {
   max_trades_per_day: number;
   max_open_positions: number;
   live_trading_enabled: boolean;
+  execution_mode: "PENDING_BEFORE_SIGNAL" | "MARKET_AFTER_SIGNAL" | "REARM_PENDING";
   updated_at?: string;
 };
 
@@ -84,6 +87,45 @@ type TradeAction = {
   take_profit?: number;
 };
 
+type BrokerOrder = {
+  ticket: number;
+  side: string;
+  price: number;
+  stop_loss: number;
+  take_profit: number;
+  volume: number;
+  state: number;
+  comment?: string;
+};
+
+type BrokerPosition = {
+  ticket: number;
+  side: string;
+  price: number;
+  current_price: number;
+  stop_loss: number;
+  take_profit: number;
+  volume: number;
+  profit: number;
+};
+
+type ChartCandle = {
+  time: string;
+  open: number;
+  high: number;
+  low: number;
+  close: number;
+  tick_volume: number;
+};
+
+type ChartFeed = {
+  symbol: string;
+  timeframe: string;
+  candles: ChartCandle[];
+  live_price: number;
+  server_time: string;
+};
+
 type Signal = {
   checked_at?: string;
   strategy_id?: string;
@@ -95,6 +137,7 @@ type Signal = {
   range_low?: number;
   buy_trigger?: number;
   sell_trigger?: number;
+  trigger_override_active?: boolean;
   buffer?: string;
   phase?: string;
   status?: string;
@@ -121,6 +164,18 @@ type LogRow = {
   payload?: Record<string, unknown>;
 };
 
+type EventLogRow = {
+  id: number;
+  created_at: string;
+  day_key: string;
+  level: string;
+  event: string;
+  strategy_id: string;
+  symbol: string;
+  message: string;
+  payload?: Record<string, unknown>;
+};
+
 type AlgoState = {
   running: boolean;
   active_strategy_id: string;
@@ -130,42 +185,49 @@ type AlgoState = {
   last_error: string;
   algo_status: string;
   pending_order_day: string;
+  buy_trigger_override?: number | null;
+  sell_trigger_override?: number | null;
+  trigger_override_day?: string;
   last_signal: Signal;
   live_quote: LiveQuote;
+  pending_orders: BrokerOrder[];
+  open_positions: BrokerPosition[];
   strategies: Strategy[];
   signal_log: LogRow[];
   trade_log: LogRow[];
+  event_log: EventLogRow[];
   database: string;
 };
 
 const emptyStrategy: Strategy = {
   id: "",
-  name: "BTCUSD# M5 breakout",
+  name: "",
   data_source: "MT5",
-  symbol: "BTCUSD#",
-  timeframe: "M5",
-  trail_timeframe: "M5",
-  entry_pattern: "BOTH",
-  range_start: "08:15",
-  range_end: "09:30",
-  session_start: "09:30",
-  entry_cutoff: "18:00",
-  session_end: "19:30",
-  entry_buffer_pct: 0.05,
+  symbol: "",
+  timeframe: "",
+  trail_timeframe: "",
+  entry_pattern: "",
+  range_start: "",
+  range_end: "",
+  session_start: "",
+  entry_cutoff: "",
+  session_end: "",
+  entry_buffer_pct: "" as unknown as number,
   entry_buffer_points: 0,
-  stop_points: 400,
+  stop_points: "" as unknown as number,
   stop_points_unit: "POINTS",
-  first_trail_profit: 400,
+  first_trail_profit: "" as unknown as number,
   first_trail_profit_unit: "POINTS",
-  first_trail_lock_loss: 200,
+  first_trail_lock_loss: "" as unknown as number,
   first_trail_lock_loss_unit: "POINTS",
-  second_trail_profit: 700,
+  second_trail_profit: "" as unknown as number,
   second_trail_profit_unit: "POINTS",
-  volume: 1,
+  volume: "" as unknown as number,
   target_points: 0,
   max_trades_per_day: 1,
   max_open_positions: 1,
   live_trading_enabled: false,
+  execution_mode: "" as Strategy["execution_mode"],
 };
 
 const timeframes = ["M1", "M2", "M3", "M4", "M5", "M10", "M15", "M30", "H1", "H4"];
@@ -323,6 +385,20 @@ function buildTrailPlan(strategy: Strategy, signal: Signal, trade?: LogRow, quot
   return { side, entry, initialStop, firstTrigger, firstStop, secondTrigger, move, firstHit, firstStopHit, secondHit };
 }
 
+function tradeLevelPlan(strategy: Strategy, level: number | null, side: "BUY" | "SELL") {
+  if (level === null) return { stop: null, first: null, lock: null, second: null };
+  const stopDistance = distanceToPoints(strategy.stop_points, strategy.stop_points_unit, level);
+  const firstDistance = distanceToPoints(strategy.first_trail_profit, strategy.first_trail_profit_unit, level);
+  const lockDistance = distanceToPoints(strategy.first_trail_lock_loss, strategy.first_trail_lock_loss_unit, level);
+  const secondDistance = distanceToPoints(strategy.second_trail_profit, strategy.second_trail_profit_unit, level);
+  return {
+    stop: side === "BUY" ? level - stopDistance : level + stopDistance,
+    first: side === "BUY" ? level + firstDistance : level - firstDistance,
+    lock: side === "BUY" ? level + lockDistance : level - lockDistance,
+    second: side === "BUY" ? level + firstDistance + secondDistance : level - firstDistance - secondDistance,
+  };
+}
+
 async function apiJson<T>(url: string, options?: RequestInit): Promise<T> {
   const response = await fetch(url, {
     ...options,
@@ -363,30 +439,45 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
     });
   }, [state?.trade_log, selectedStrategy.id]);
   const latestTodayTrade = todayTrades[0];
+  const livePosition = state?.open_positions?.[0];
+  const effectiveTrade: LogRow | undefined = livePosition
+    ? {
+        ...(latestTodayTrade || {}),
+        id: latestTodayTrade?.id || -livePosition.ticket,
+        created_at: latestTodayTrade?.created_at || state?.started_at || new Date().toISOString(),
+        strategy_id: selectedStrategy.id,
+        symbol: selectedStrategy.symbol,
+        side: livePosition.side,
+        status: "POSITION_OPEN",
+        entry_price: livePosition.price,
+        stop_loss: livePosition.stop_loss,
+        payload: { ...(latestTodayTrade?.payload || {}), position_ticket: livePosition.ticket, profit: livePosition.profit },
+      }
+    : latestTodayTrade?.status === "POSITION_OPEN"
+      ? undefined
+      : latestTodayTrade;
   const signalToday = isTodayIst(activeSignal.checked_at);
-  const trailPlan = buildTrailPlan(selectedStrategy, signalToday ? activeSignal : {}, latestTodayTrade, liveQuote);
-  const hasSignal = signalToday && Boolean(activeSignal.status || activeSignal.side);
-  const headerSide = latestTodayTrade?.side || (signalToday ? activeSignal.side : "") || "";
-  const headerStop = latestTodayTrade?.stop_loss ?? (signalToday ? activeSignal.stop_loss : undefined);
+  const trailPlan = buildTrailPlan(selectedStrategy, signalToday ? activeSignal : {}, effectiveTrade, liveQuote);
+  const hasSignal = signalToday && ["BUY", "SELL"].includes(String(activeSignal.side || "").toUpperCase());
+  const headerSide = effectiveTrade?.side || (signalToday ? activeSignal.side : "") || "";
+  const headerStop = effectiveTrade?.stop_loss ?? (signalToday ? activeSignal.stop_loss : undefined);
   const headerLivePrice = headerSide === "BUY" || headerSide === "SELL" ? liveExitPrice(headerSide, liveQuote) : toNumber(liveQuote.last) ?? toNumber(liveQuote.bid);
   const headerStopNumber = toNumber(headerStop);
   const headerLiveNumber = toNumber(headerLivePrice);
   const headerStopLossHit =
-    hasStopLossText(
-      latestTodayTrade?.status,
-      latestTodayTrade?.message,
-      latestTodayTrade?.payload?.status,
-      latestTodayTrade?.payload?.message,
-      activeSignal.trade_action?.status,
-      activeSignal.trade_action?.message,
-      activeSignal.status,
-      activeSignal.message,
+    Boolean(effectiveTrade) &&
+    (hasStopLossText(
+      effectiveTrade?.status,
+      effectiveTrade?.message,
+      effectiveTrade?.payload?.status,
+      effectiveTrade?.payload?.message,
     ) ||
     (hasSignal &&
       headerStopNumber !== null &&
       headerLiveNumber !== null &&
-      (headerSide === "BUY" ? headerLiveNumber <= headerStopNumber : headerSide === "SELL" ? headerLiveNumber >= headerStopNumber : false));
+      (headerSide === "BUY" ? headerLiveNumber <= headerStopNumber : headerSide === "SELL" ? headerLiveNumber >= headerStopNumber : false)));
   const isSettings = view === "settings";
+  const isLogs = view === "logs";
 
   const loadSymbols = useCallback(async (query = "") => {
     try {
@@ -403,9 +494,14 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
   }, [view]);
 
   useEffect(() => {
-    const onPopState = () => {
-      setView(window.location.pathname === "/settings" ? "settings" : "dashboard");
+    const viewFromLocation = () => {
+      const params = new URLSearchParams(window.location.search);
+      return window.location.pathname === "/settings" ? "settings" : params.get("view") === "logs" ? "logs" : "dashboard";
     };
+    const onPopState = () => {
+      setView(viewFromLocation());
+    };
+    setView(viewFromLocation());
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
@@ -540,6 +636,48 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
     }
   }
 
+  async function updateTriggerLevel(side: "BUY" | "SELL", price: number) {
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const data = await apiJson<AlgoState & { level_update?: { message?: string } }>("/api/algo/control", {
+        method: "POST",
+        body: JSON.stringify({ action: "update_level", strategy_id: selectedStrategy.id, side, price }),
+      });
+      setState(data);
+      setMessage(data.level_update?.message || `${side} trigger updated.`);
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ type: "refresh" }));
+    } catch (levelError) {
+      const text = levelError instanceof Error ? levelError.message : "Trigger update failed.";
+      setError(text);
+      throw levelError;
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function resetTriggerLevels() {
+    if (!window.confirm("Remove manual BUY/SELL levels and restore strategy-calculated levels? Existing pending MT5 orders will be refreshed.")) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const data = await apiJson<AlgoState & { level_reset?: { message?: string } }>("/api/algo/control", {
+        method: "POST",
+        body: JSON.stringify({ action: "reset_levels", strategy_id: selectedStrategy.id }),
+      });
+      setState(data);
+      setMessage(data.level_reset?.message || "Strategy levels restored.");
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ type: "refresh" }));
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : "Strategy level reset failed.");
+      throw resetError;
+    } finally {
+      setBusy(false);
+    }
+  }
+
   function selectStrategy(strategy: Strategy) {
     setForm(strategy);
     setMessage("");
@@ -547,7 +685,7 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
   }
 
   function navigate(nextView: DeskView) {
-    const href = nextView === "settings" ? "/settings" : "/";
+    const href = nextView === "settings" ? "/settings" : nextView === "logs" ? "/?view=logs" : "/";
     setView(nextView);
     window.history.pushState({}, "", href);
     window.scrollTo(0, 0);
@@ -568,12 +706,18 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
           </div>
 
           <nav className="ml-4 grid flex-1 grid-cols-2 gap-2 text-sm lg:ml-0 lg:mt-8 lg:flex-none lg:grid-cols-1">
-            <button className={navClass(!isSettings)} onClick={() => navigate("dashboard")} type="button">
+            <button className={navClass(!isSettings && !isLogs)} onClick={() => navigate("dashboard")} type="button">
               <Activity size={16} /> Dashboard
             </button>
             <button className={navClass(isSettings)} onClick={() => navigate("settings")} type="button">
               <Settings size={16} /> Settings
             </button>
+            <button className={navClass(isLogs)} onClick={() => navigate("logs")} type="button">
+              <ScrollText size={16} /> Logs
+            </button>
+            <a className={navClass(false)} href="/chart" rel="noopener noreferrer" target="_blank">
+              <ChartNoAxesCombined size={16} /> Chart
+            </a>
           </nav>
 
           <div className="hidden rounded-xl border border-white/10 bg-white/[0.08] p-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] lg:mt-8 lg:block">
@@ -598,8 +742,8 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
             status={headerStopLossHit ? "Stop loss hit." : state?.algo_status || "Loading..."}
             strategy={selectedStrategy}
             lastSignalAt={activeSignal.checked_at}
-            title={isSettings ? "Strategy Settings" : "Trading Dashboard"}
-            subtitle={isSettings ? "Manage your strategy configuration." : "Today signal, entry, stop loss, and trail status in one place."}
+            title={isSettings ? "Strategy Settings" : isLogs ? "Technical Logs" : "Trading Dashboard"}
+            subtitle={isSettings ? "Manage your strategy configuration." : isLogs ? "Daily technical event logs for order and SL tracking." : "Today signal, entry, stop loss, and trail status in one place."}
             lastError={state?.last_error}
             socketConnected={socketConnected}
             onCheck={() => void control("check")}
@@ -636,17 +780,23 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
                   first_trail_lock_loss_unit: emptyStrategy.first_trail_lock_loss_unit,
                   second_trail_profit: emptyStrategy.second_trail_profit,
                   second_trail_profit_unit: emptyStrategy.second_trail_profit_unit,
+                  live_trading_enabled: false,
+                  execution_mode: emptyStrategy.execution_mode,
                 }))
               }
               onSave={saveStrategy}
               onSymbolSearch={loadSymbols}
             />
+          ) : isLogs ? (
+            <LogsView logs={state?.event_log || []} />
           ) : (
             <DashboardView
               activeSignal={activeSignal}
               hasSignal={hasSignal}
-              latestTodayTrade={latestTodayTrade}
+              latestTodayTrade={effectiveTrade}
               liveQuote={liveQuote}
+              livePosition={livePosition}
+              pendingOrders={state?.pending_orders || []}
               running={Boolean(state?.running)}
               selectedStrategy={selectedStrategy}
               signalToday={signalToday}
@@ -655,6 +805,8 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
               trailPlan={trailPlan}
               onNavigateSettings={() => navigate("settings")}
               onSelect={selectStrategy}
+              onResetLevels={resetTriggerLevels}
+              onUpdateLevel={updateTriggerLevel}
             />
           )}
         </section>
@@ -875,8 +1027,8 @@ function ControlHeader({
 
   return (
     <header className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-[0_6px_20px_rgba(15,23,42,0.06)]">
-      <div className="grid xl:grid-cols-[minmax(0,1fr)_150px_172px]">
-        <section className="p-3 xl:border-r xl:border-slate-200 xl:p-4">
+      <div className="grid md:grid-cols-[minmax(0,1fr)_128px_150px] xl:grid-cols-[minmax(0,1fr)_150px_172px]">
+        <section className="min-w-0 p-3 md:border-r md:border-slate-200 xl:p-4">
           <div className="flex flex-wrap items-center gap-2.5">
             <span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[11px] font-semibold ${socketConnected ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700"}`}>
               <span className={`h-2 w-2 rounded-full ${socketConnected ? "bg-emerald-500" : "bg-amber-500"}`} />
@@ -899,7 +1051,7 @@ function ControlHeader({
           </div>
         </section>
 
-        <section className="flex flex-col items-center justify-center border-t border-slate-200 p-3 xl:border-r xl:border-t-0">
+        <section className="flex flex-col items-center justify-center border-t border-slate-200 p-3 md:border-r md:border-t-0">
           <PowerSwitch
             checked={running}
             disabled={busy || (!running && !strategy.symbol)}
@@ -913,7 +1065,7 @@ function ControlHeader({
           </div>
         </section>
 
-        <section className="grid content-center gap-2 border-t border-slate-200 p-3 xl:border-t-0">
+        <section className="grid content-center gap-2 border-t border-slate-200 p-3 md:border-t-0">
           <button
             className="inline-flex min-h-9 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-emerald-700 to-emerald-600 px-3 py-2 text-sm font-semibold text-white shadow-[0_5px_14px_rgba(5,150,105,0.18)] transition hover:brightness-105"
             disabled={busy}
@@ -978,11 +1130,151 @@ function PowerSwitch({
   );
 }
 
+export function ChartOnlyPage() {
+  const [state, setState] = useState<AlgoState | null>(null);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let disposed = false;
+    const loadChartContext = async () => {
+      try {
+        const data = await apiJson<AlgoState>("/api/algo", { cache: "no-store" });
+        if (!disposed) {
+          setState(data);
+          setError("");
+        }
+      } catch (loadError) {
+        if (!disposed) setError(loadError instanceof Error ? loadError.message : "Unable to load chart.");
+      }
+    };
+    void loadChartContext();
+    const timer = window.setInterval(loadChartContext, 2000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, []);
+
+  const strategy = state?.active_strategy || state?.strategies?.[0];
+  const signal = state?.last_signal || {};
+  const signalToday = isTodayIst(signal.checked_at);
+  const liveQuote = state?.live_quote || signal.live_quote || {};
+  const todayTrades = (state?.trade_log || []).filter(
+    (trade) => isTodayIst(trade.created_at) && (!strategy?.id || trade.strategy_id === strategy.id),
+  );
+  const latestTrade = todayTrades[0];
+  const livePosition = state?.open_positions?.[0];
+  const effectiveTrade: LogRow | undefined = livePosition && strategy
+    ? {
+        ...(latestTrade || {}),
+        id: latestTrade?.id || -livePosition.ticket,
+        created_at: latestTrade?.created_at || state?.started_at || new Date().toISOString(),
+        strategy_id: strategy.id,
+        symbol: strategy.symbol,
+        side: livePosition.side,
+        status: "POSITION_OPEN",
+        entry_price: livePosition.price,
+        stop_loss: livePosition.stop_loss,
+      }
+    : latestTrade?.status === "POSITION_OPEN"
+      ? undefined
+      : latestTrade;
+  const trailPlan = strategy ? buildTrailPlan(strategy, signalToday ? signal : {}, effectiveTrade, liveQuote) : null;
+  const entry = toNumber(effectiveTrade?.entry_price ?? (signalToday ? signal.entry_reference : undefined));
+  const stopLoss = toNumber(effectiveTrade?.stop_loss ?? (signalToday ? signal.stop_loss : undefined));
+
+  return (
+    <main className="min-h-screen bg-[#f3f8fb] p-3 text-neutral-950 lg:p-5">
+      <div className="mx-auto max-w-[1500px]">
+        {strategy ? (
+          <LiveTradingChart
+            entry={entry}
+            firstTarget={trailPlan?.firstTrigger ?? null}
+            secondTarget={trailPlan?.secondTrigger ?? null}
+            signal={signalToday ? signal : {}}
+            stopLoss={stopLoss}
+            strategy={strategy}
+          />
+        ) : (
+          <div className="grid min-h-[360px] place-items-center rounded-xl border border-slate-200 bg-white text-sm text-slate-600">
+            {error || "Loading chart..."}
+          </div>
+        )}
+      </div>
+    </main>
+  );
+}
+
+function LogsView({ logs }: { logs: EventLogRow[] }) {
+  const ordered = [...logs].sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+  const latest = ordered[0];
+  const levelClass = (level: string) => {
+    const text = level.toUpperCase();
+    if (text === "ERROR") return "border-rose-500/40 bg-rose-500/10 text-rose-200";
+    if (text === "ORDER") return "border-cyan-400/40 bg-cyan-400/10 text-cyan-100";
+    if (text === "TRADE") return "border-emerald-400/40 bg-emerald-400/10 text-emerald-100";
+    if (text === "SIGNAL") return "border-amber-300/40 bg-amber-300/10 text-amber-100";
+    return "border-slate-500/40 bg-slate-500/10 text-slate-200";
+  };
+
+  return (
+    <div className="mx-auto mt-3 max-w-[1460px]">
+      <section className="overflow-hidden rounded-xl border border-slate-800 bg-[#05070b] shadow-[0_18px_50px_rgba(2,6,23,0.22)]">
+        <div className="flex flex-wrap items-center gap-3 border-b border-slate-800 bg-[#090d14] px-4 py-3 text-slate-200">
+          <div className="grid h-10 w-10 place-items-center rounded-lg border border-emerald-400/20 bg-emerald-400/10 text-emerald-200">
+            <Terminal size={20} />
+          </div>
+          <div>
+            <h2 className="text-base font-semibold text-white">Daily Technical Logs</h2>
+            <p className="text-xs text-slate-400">Auto-clears when the trading day changes. Latest: {latest ? compactTime(latest.created_at) : "-"}</p>
+          </div>
+          <span className="ml-auto rounded-lg border border-slate-700 bg-slate-900 px-2.5 py-1 text-xs font-semibold text-slate-300">
+            {ordered.length} events today
+          </span>
+        </div>
+
+        <div className="max-h-[calc(100vh-230px)] min-h-[520px] overflow-auto p-3 font-mono text-[12px] leading-relaxed">
+          {ordered.length ? (
+            <div className="grid gap-2">
+              {ordered.map((item) => (
+                <article key={item.id} className="rounded-lg border border-slate-800 bg-black/45 px-3 py-2 text-slate-300">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-slate-500">{compactTime(item.created_at)}</span>
+                    <span className={`rounded-md border px-2 py-0.5 text-[11px] font-bold ${levelClass(item.level)}`}>{item.level}</span>
+                    <span className="text-emerald-200">{item.event}</span>
+                    {item.symbol && <span className="rounded bg-slate-900 px-1.5 py-0.5 text-slate-400">{item.symbol}</span>}
+                  </div>
+                  <div className="mt-1 whitespace-pre-wrap text-slate-100">{item.message}</div>
+                  {item.payload && Object.keys(item.payload).length > 0 && (
+                    <pre className="mt-2 max-h-36 overflow-auto rounded border border-slate-800 bg-[#030508] p-2 text-[11px] text-slate-400">
+                      {JSON.stringify(item.payload, null, 2)}
+                    </pre>
+                  )}
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="grid h-[420px] place-items-center text-center text-slate-500">
+              <div>
+                <Terminal className="mx-auto mb-3 text-slate-700" size={34} />
+                <div className="text-sm text-slate-300">No technical logs yet today.</div>
+                <div className="mt-1 text-xs">Order, signal, SL modify, and error events will appear here.</div>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function DashboardView({
   activeSignal,
   hasSignal,
   latestTodayTrade,
   liveQuote,
+  livePosition,
+  pendingOrders,
   running,
   selectedStrategy,
   signalToday,
@@ -990,12 +1282,16 @@ function DashboardView({
   todayTrades,
   trailPlan,
   onNavigateSettings,
+  onResetLevels,
   onSelect,
+  onUpdateLevel,
 }: {
   activeSignal: Signal;
   hasSignal: boolean;
   latestTodayTrade?: LogRow;
   liveQuote: LiveQuote;
+  livePosition?: BrokerPosition;
+  pendingOrders: BrokerOrder[];
   running: boolean;
   selectedStrategy: Strategy;
   signalToday: boolean;
@@ -1003,8 +1299,11 @@ function DashboardView({
   todayTrades: LogRow[];
   trailPlan: ReturnType<typeof buildTrailPlan>;
   onNavigateSettings: () => void;
+  onResetLevels: () => Promise<void>;
   onSelect: (strategy: Strategy) => void;
+  onUpdateLevel: (side: "BUY" | "SELL", price: number) => Promise<void>;
 }) {
+  const [resettingLevels, setResettingLevels] = useState(false);
   const side = latestTodayTrade?.side || (signalToday ? activeSignal.side : "") || "-";
   const entry = latestTodayTrade?.entry_price ?? (signalToday ? activeSignal.entry_reference : undefined);
   const stop = latestTodayTrade?.stop_loss ?? (signalToday ? activeSignal.stop_loss : undefined);
@@ -1012,6 +1311,18 @@ function DashboardView({
   const displayLivePrice = side === "BUY" || side === "SELL" ? liveExitPrice(side, liveQuote) : toNumber(liveQuote.last) ?? toNumber(liveQuote.bid);
   const livePoints = trailPlan.move;
   const tradeAction = activeSignal.trade_action;
+  const rangeReady = signalToday && activeSignal.phase !== "WAIT_RANGE" && activeSignal.phase !== "WAIT_SESSION";
+  const buyLevel = rangeReady ? toNumber(activeSignal.buy_trigger) : null;
+  const sellLevel = rangeReady ? toNumber(activeSignal.sell_trigger) : null;
+  const marketPrice = toNumber(liveQuote.last) ?? toNumber(liveQuote.bid) ?? toNumber(liveQuote.ask);
+  const buyTriggered = hasSignal && side === "BUY";
+  const sellTriggered = hasSignal && side === "SELL";
+  const buyPending = pendingOrders.find((order) => order.side === "BUY");
+  const sellPending = pendingOrders.find((order) => order.side === "SELL");
+  const buyClosedByOco = livePosition?.side === "SELL";
+  const sellClosedByOco = livePosition?.side === "BUY";
+  const buyPlan = tradeLevelPlan(selectedStrategy, buyLevel, "BUY");
+  const sellPlan = tradeLevelPlan(selectedStrategy, sellLevel, "SELL");
   const entryNumber = toNumber(entry);
   const stopNumber = toNumber(stop);
   const livePriceNumber = toNumber(displayLivePrice);
@@ -1030,7 +1341,7 @@ function DashboardView({
     stopNumber !== null &&
     livePriceNumber !== null &&
     (side === "BUY" ? livePriceNumber <= stopNumber : side === "SELL" ? livePriceNumber >= stopNumber : false);
-  const stopLossHit = explicitStopLossHit || priceStopLossHit;
+  const stopLossHit = tradeTaken && (explicitStopLossHit || priceStopLossHit);
   const displayPrice = stopLossHit && stopNumber !== null ? stopNumber : displayLivePrice;
   const stopMove =
     stopLossHit && entryNumber !== null && stopNumber !== null
@@ -1056,7 +1367,7 @@ function DashboardView({
     <div className="mx-auto mt-3 max-w-[1460px]">
       <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_310px]">
         <div className="grid content-start gap-3">
-          <section className="self-start rounded-xl border border-slate-200/80 bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
+          <section className="order-1 self-start rounded-xl border border-slate-200/80 bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
             <div className="flex items-center gap-3">
               <Radio size={17} className={stopLossHit ? "text-rose-600" : "text-emerald-700"} />
               <h2 className="text-lg font-semibold tracking-tight text-slate-950">Today&apos;s Signal</h2>
@@ -1119,7 +1430,109 @@ function DashboardView({
             </div>
           </section>
 
-          <section className="self-start rounded-xl border border-slate-200/80 bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
+          <section className="order-3 self-start rounded-xl border border-slate-200/80 bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
+            <div className="flex items-center gap-2">
+              <h2 className="text-lg font-semibold tracking-tight text-slate-950">Live Trade Levels</h2>
+              <Info size={17} className="text-slate-400" />
+              <div className="ml-auto flex flex-wrap items-center justify-end gap-2">
+                {activeSignal.trigger_override_active ? (
+                  <>
+                    <span className="rounded-full bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-800">EDITED MODE</span>
+                    <button
+                      className="inline-flex min-h-8 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 text-xs font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                      disabled={resettingLevels}
+                      onClick={async () => {
+                        setResettingLevels(true);
+                        try {
+                          await onResetLevels();
+                        } finally {
+                          setResettingLevels(false);
+                        }
+                      }}
+                      type="button"
+                    >
+                      <RotateCcw size={14} /> {resettingLevels ? "Resetting..." : "Reset to Strategy"}
+                    </button>
+                  </>
+                ) : (
+                  <span className="rounded-full bg-blue-50 px-2.5 py-1 text-xs font-semibold text-blue-700">STRATEGY MODE</span>
+                )}
+              </div>
+            </div>
+            <p className="mt-1 text-sm text-slate-500">
+              {rangeReady ? "Exact prices where the system will detect a BUY or SELL breakout." : "Breakout trigger prices will appear after the range window closes."}
+            </p>
+
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <TradeLevelCard
+                enabled={rangeReady && selectedStrategy.entry_pattern !== "SELL_ONLY"}
+                icon={<TrendingUp size={24} />}
+                label="BUY above"
+                level={buyLevel}
+                locked={buyClosedByOco}
+                order={buyPending}
+                plan={buyPlan}
+                onUpdate={(price) => onUpdateLevel("BUY", price)}
+                note={
+                  !rangeReady
+                    ? activeSignal.message || "Range window is still forming."
+                    : buyClosedByOco
+                    ? buyPending
+                      ? "SELL position is open - cancelling opposite BUY order in MT5"
+                      : "SELL position is open - opposite BUY order was cancelled by OCO"
+                    : buyPending
+                    ? `Pending BUY STOP is live in MT5 · Ticket #${buyPending.ticket} · SL ${numberText(buyPending.stop_loss)}`
+                    : buyTriggered
+                    ? "BUY trigger crossed"
+                    : buyLevel === null
+                      ? activeSignal.message || "Waiting for range levels"
+                      : marketPrice === null
+                        ? "Waiting for live price"
+                        : `${numberText(Math.max(buyLevel - marketPrice, 0))} pts away from live price`
+                }
+                tone="green"
+                triggered={buyTriggered}
+              />
+              <TradeLevelCard
+                enabled={rangeReady && selectedStrategy.entry_pattern !== "BUY_ONLY"}
+                icon={<TrendingDown size={24} />}
+                label="SELL below"
+                level={sellLevel}
+                locked={sellClosedByOco}
+                order={sellPending}
+                plan={sellPlan}
+                onUpdate={(price) => onUpdateLevel("SELL", price)}
+                note={
+                  !rangeReady
+                    ? activeSignal.message || "Range window is still forming."
+                    : sellClosedByOco
+                    ? sellPending
+                      ? "BUY position is open - cancelling opposite SELL order in MT5"
+                      : "BUY position is open - opposite SELL order was cancelled by OCO"
+                    : sellPending
+                    ? `Pending SELL STOP is live in MT5 · Ticket #${sellPending.ticket} · SL ${numberText(sellPending.stop_loss)}`
+                    : sellTriggered
+                    ? "SELL trigger crossed"
+                    : sellLevel === null
+                      ? activeSignal.message || "Waiting for range levels"
+                      : marketPrice === null
+                        ? "Waiting for live price"
+                        : `${numberText(Math.max(marketPrice - sellLevel, 0))} pts away from live price`
+                }
+                tone="red"
+                triggered={sellTriggered}
+              />
+            </div>
+
+            <div className="mt-3 flex flex-wrap items-center gap-x-5 gap-y-2 rounded-lg border border-blue-100 bg-blue-50/70 px-3 py-2 text-sm text-blue-900">
+              <span><strong>Live:</strong> {numberText(marketPrice)}</span>
+              <span><strong>Range High:</strong> {numberText(signalToday ? activeSignal.range_high : null)}</span>
+              <span><strong>Range Low:</strong> {numberText(signalToday ? activeSignal.range_low : null)}</span>
+              <span className="ml-auto text-xs text-blue-700">{phaseText(activeSignal.phase)}</span>
+            </div>
+          </section>
+
+          <section className="order-2 self-start rounded-xl border border-slate-200/80 bg-white p-3 shadow-[0_10px_28px_rgba(15,23,42,0.06)]">
             <div className="flex items-center gap-2">
               <h2 className="text-lg font-semibold tracking-tight text-slate-950">{stopLossHit ? "Trade Summary" : "Targets &amp; Trailing"}</h2>
               <Info size={17} className="text-slate-400" />
@@ -1159,6 +1572,7 @@ function DashboardView({
               )}
             </div>
           </section>
+
         </div>
 
         <aside className="grid content-start gap-3">
@@ -1185,6 +1599,322 @@ function DashboardView({
           />
         </aside>
       </div>
+    </div>
+  );
+}
+
+function LiveTradingChart({
+  entry,
+  firstTarget,
+  secondTarget,
+  signal,
+  stopLoss,
+  strategy,
+}: {
+  entry: number | null;
+  firstTarget: number | null;
+  secondTarget: number | null;
+  signal: Signal;
+  stopLoss: number | null;
+  strategy: Strategy;
+}) {
+  const [feed, setFeed] = useState<ChartFeed | null>(null);
+  const [error, setError] = useState("");
+  const [crosshair, setCrosshair] = useState<{ index: number; x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    if (!strategy.id || !strategy.symbol) return;
+    let disposed = false;
+    let timer = 0;
+    const loadChart = async () => {
+      try {
+        const data = await apiJson<ChartFeed>(`/api/algo/chart?strategy_id=${encodeURIComponent(strategy.id)}&count=90`, { cache: "no-store" });
+        if (!disposed) {
+          setFeed(data);
+          setError("");
+        }
+      } catch (chartError) {
+        if (!disposed) setError(chartError instanceof Error ? chartError.message : "Live chart unavailable.");
+      } finally {
+        if (!disposed) timer = window.setTimeout(loadChart, 2000);
+      }
+    };
+    void loadChart();
+    return () => {
+      disposed = true;
+      window.clearTimeout(timer);
+    };
+  }, [strategy.id, strategy.symbol]);
+
+  const candles = (feed?.candles || []).slice(-72);
+  const buyTrigger = toNumber(signal.buy_trigger);
+  const sellTrigger = toNumber(signal.sell_trigger);
+  const lineCandidates = [buyTrigger, sellTrigger, entry, stopLoss, firstTarget, secondTarget, toNumber(feed?.live_price)].filter(
+    (value): value is number => value !== null && Number.isFinite(value),
+  );
+  const candleLows = candles.map((candle) => candle.low);
+  const candleHighs = candles.map((candle) => candle.high);
+  const rawMin = Math.min(...candleLows, ...lineCandidates);
+  const rawMax = Math.max(...candleHighs, ...lineCandidates);
+  const validRange = Number.isFinite(rawMin) && Number.isFinite(rawMax);
+  const spread = validRange ? Math.max(rawMax - rawMin, Math.abs(rawMax || 1) * 0.0005) : 1;
+  const minPrice = validRange ? rawMin - spread * 0.08 : 0;
+  const maxPrice = validRange ? rawMax + spread * 0.08 : 1;
+  const width = 1100;
+  const height = 440;
+  const plotLeft = 18;
+  const plotRight = 986;
+  const plotTop = 24;
+  const plotBottom = 382;
+  const plotWidth = plotRight - plotLeft;
+  const plotHeight = plotBottom - plotTop;
+  const step = candles.length ? plotWidth / candles.length : plotWidth;
+  const bodyWidth = Math.max(3, Math.min(step * 0.62, 11));
+  const yFor = (price: number) => plotTop + ((maxPrice - price) / (maxPrice - minPrice)) * plotHeight;
+  const priceForY = (y: number) => maxPrice - ((y - plotTop) / plotHeight) * (maxPrice - minPrice);
+  const timeText = (value?: string) =>
+    value
+      ? new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).format(new Date(value))
+      : "--:--";
+  const priceText = (value: number) => value.toLocaleString("en-IN", { maximumFractionDigits: 3 });
+  const triggerIndex = signal.trigger_candle_time
+    ? candles.reduce((best, candle, index) =>
+        Math.abs(new Date(candle.time).getTime() - new Date(signal.trigger_candle_time || "").getTime()) <
+        Math.abs(new Date(candles[best]?.time || 0).getTime() - new Date(signal.trigger_candle_time || "").getTime())
+          ? index
+          : best, 0)
+    : -1;
+  const levels = [
+    { label: "BUY", value: buyTrigger, color: "#6ee7b7", dash: "7 6" },
+    { label: "SELL", value: sellTrigger, color: "#fda4af", dash: "7 6" },
+    { label: "ENTRY", value: entry, color: "#67e8f9", dash: "" },
+    { label: "SL", value: stopLoss, color: "#fb7185", dash: "3 5" },
+    { label: "T1", value: firstTarget, color: "#86efac", dash: "3 5" },
+    { label: "T2", value: secondTarget, color: "#4ade80", dash: "3 5" },
+  ].filter((level): level is { label: string; value: number; color: string; dash: string } => level.value !== null && Number.isFinite(level.value));
+  const hoveredCandle = crosshair ? candles[crosshair.index] : null;
+
+  const updateCrosshair = (event: React.MouseEvent<SVGSVGElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = ((event.clientX - bounds.left) / bounds.width) * width;
+    const y = ((event.clientY - bounds.top) / bounds.height) * height;
+    if (x < plotLeft || x > plotRight || y < plotTop || y > plotBottom || !candles.length) {
+      setCrosshair(null);
+      return;
+    }
+    const index = Math.max(0, Math.min(candles.length - 1, Math.floor((x - plotLeft) / step)));
+    setCrosshair({ index, x: plotLeft + (index + 0.5) * step, y });
+  };
+
+  return (
+    <section className="order-4 overflow-hidden rounded-xl border border-slate-800 bg-[#050809] shadow-[0_18px_45px_rgba(2,8,23,0.22)]">
+      <div className="flex flex-wrap items-center gap-3 border-b border-white/10 px-4 py-3 text-white">
+        <div>
+          <div className="flex items-center gap-2">
+            <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-400 shadow-[0_0_12px_#34d399]" />
+            <h2 className="font-semibold tracking-tight">Live Market Chart</h2>
+          </div>
+          <div className="mt-0.5 text-xs text-slate-400">{feed?.symbol || strategy.symbol} · {feed?.timeframe || strategy.timeframe} · IST</div>
+        </div>
+        <div className="ml-auto text-right">
+          <div className="font-mono text-lg font-semibold text-slate-100">{feed ? priceText(feed.live_price) : "Connecting..."}</div>
+          <div className="text-[11px] text-slate-500">{error || `Live · ${timeText(feed?.server_time)}`}</div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        {candles.length ? (
+          <svg
+            aria-label={`${strategy.symbol} live candlestick chart`}
+            className="block min-w-[760px] w-full cursor-crosshair"
+            onMouseLeave={() => setCrosshair(null)}
+            onMouseMove={updateCrosshair}
+            role="img"
+            viewBox={`0 0 ${width} ${height}`}
+          >
+            <defs>
+              <filter id="live-candle-glow" x="-50%" y="-50%" width="200%" height="200%">
+                <feGaussianBlur stdDeviation="2.4" result="blur" />
+                <feMerge><feMergeNode in="blur" /><feMergeNode in="SourceGraphic" /></feMerge>
+              </filter>
+              <linearGradient id="chart-fade" x1="0" x2="0" y1="0" y2="1">
+                <stop offset="0" stopColor="#0c1817" />
+                <stop offset="1" stopColor="#030506" />
+              </linearGradient>
+            </defs>
+            <rect width={width} height={height} fill="url(#chart-fade)" />
+
+            {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+              const y = plotTop + plotHeight * fraction;
+              return <line key={`grid-${fraction}`} x1={plotLeft} x2={plotRight} y1={y} y2={y} stroke="#1e3a38" strokeOpacity="0.55" strokeWidth="1" />;
+            })}
+
+            {levels.map((level) => {
+              const y = yFor(level.value);
+              return (
+                <g key={`${level.label}-${level.value}`}>
+                  <line x1={plotLeft} x2={plotRight} y1={y} y2={y} stroke={level.color} strokeDasharray={level.dash} strokeOpacity="0.7" strokeWidth="1.2" />
+                  <rect x={plotRight + 5} y={y - 10} width="106" height="20" rx="4" fill="#0a0f11" stroke={level.color} strokeOpacity="0.65" />
+                  <text x={plotRight + 11} y={y + 4} fill={level.color} fontFamily="ui-monospace, monospace" fontSize="11" fontWeight="700">{level.label} {priceText(level.value)}</text>
+                </g>
+              );
+            })}
+
+            {triggerIndex >= 0 && (
+              <g>
+                <line x1={plotLeft + (triggerIndex + 0.5) * step} x2={plotLeft + (triggerIndex + 0.5) * step} y1={plotTop} y2={plotBottom} stroke="#fbbf24" strokeDasharray="4 7" strokeOpacity="0.8" />
+                <rect x={Math.min(plotLeft + (triggerIndex + 0.5) * step + 6, plotRight - 92)} y={plotTop + 5} width="88" height="22" rx="5" fill="#2a1d04" stroke="#fbbf24" strokeOpacity="0.8" />
+                <text x={Math.min(plotLeft + (triggerIndex + 0.5) * step + 14, plotRight - 84)} y={plotTop + 20} fill="#fcd34d" fontSize="11" fontWeight="700">{signal.side || "SIGNAL"} CROSS</text>
+              </g>
+            )}
+
+            {candles.map((candle, index) => {
+              const x = plotLeft + (index + 0.5) * step;
+              const rising = candle.close >= candle.open;
+              const color = rising ? "#72e6b1" : "#ff8f9d";
+              const top = yFor(Math.max(candle.open, candle.close));
+              const bottom = yFor(Math.min(candle.open, candle.close));
+              const candleHeight = Math.max(bottom - top, 1.5);
+              const current = index === candles.length - 1;
+              return (
+                <g key={`${candle.time}-${index}`} filter={current ? "url(#live-candle-glow)" : undefined}>
+                  <title>{`${timeText(candle.time)}  O ${priceText(candle.open)}  H ${priceText(candle.high)}  L ${priceText(candle.low)}  C ${priceText(candle.close)}`}</title>
+                  <line x1={x} x2={x} y1={yFor(candle.high)} y2={yFor(candle.low)} stroke={color} strokeOpacity="0.9" strokeWidth="1.25" />
+                  <rect x={x - bodyWidth / 2} y={top} width={bodyWidth} height={candleHeight} rx="1" fill={color} fillOpacity={rising ? "0.82" : "0.88"} stroke={color} />
+                </g>
+              );
+            })}
+
+            {crosshair && hoveredCandle && (
+              <g pointerEvents="none">
+                <line x1={crosshair.x} x2={crosshair.x} y1={plotTop} y2={plotBottom} stroke="#cbd5e1" strokeDasharray="4 4" strokeOpacity="0.72" />
+                <line x1={plotLeft} x2={plotRight} y1={crosshair.y} y2={crosshair.y} stroke="#cbd5e1" strokeDasharray="4 4" strokeOpacity="0.72" />
+                <circle cx={crosshair.x} cy={yFor(hoveredCandle.close)} r="4" fill="#f8fafc" stroke={hoveredCandle.close >= hoveredCandle.open ? "#72e6b1" : "#ff8f9d"} strokeWidth="2" />
+                <rect x={plotRight + 5} y={Math.max(plotTop, Math.min(crosshair.y - 10, plotBottom - 20))} width="106" height="20" rx="4" fill="#e2e8f0" />
+                <text x={plotRight + 11} y={Math.max(plotTop + 14, Math.min(crosshair.y + 4, plotBottom - 6))} fill="#0f172a" fontFamily="ui-monospace, monospace" fontSize="11" fontWeight="700">{priceText(priceForY(crosshair.y))}</text>
+                <rect x={Math.max(plotLeft, Math.min(crosshair.x - 38, plotRight - 76))} y={plotBottom + 8} width="76" height="20" rx="4" fill="#e2e8f0" />
+                <text x={Math.max(plotLeft + 38, Math.min(crosshair.x, plotRight - 38))} y={plotBottom + 22} textAnchor="middle" fill="#0f172a" fontSize="11" fontWeight="700">{timeText(hoveredCandle.time)}</text>
+                <g transform={`translate(${plotLeft + 10} ${plotTop + 10})`}>
+                  <rect width="260" height="48" rx="5" fill="#071110" fillOpacity="0.92" stroke="#28534e" />
+                  <text x="10" y="18" fill="#94a3b8" fontFamily="ui-monospace, monospace" fontSize="11">{timeText(hoveredCandle.time)}  O {priceText(hoveredCandle.open)}  H {priceText(hoveredCandle.high)}</text>
+                  <text x="10" y="36" fill={hoveredCandle.close >= hoveredCandle.open ? "#72e6b1" : "#ff8f9d"} fontFamily="ui-monospace, monospace" fontSize="11">L {priceText(hoveredCandle.low)}  C {priceText(hoveredCandle.close)}  Vol {hoveredCandle.tick_volume.toLocaleString("en-IN")}</text>
+                </g>
+              </g>
+            )}
+
+            {feed && (
+              <g>
+                <line x1={plotLeft} x2={plotRight} y1={yFor(feed.live_price)} y2={yFor(feed.live_price)} stroke="#f8fafc" strokeDasharray="2 5" strokeOpacity="0.5" />
+                <circle cx={plotRight} cy={yFor(feed.live_price)} r="3.5" fill="#f8fafc" filter="url(#live-candle-glow)" />
+              </g>
+            )}
+
+            <line x1={plotLeft} x2={plotRight} y1={plotBottom} y2={plotBottom} stroke="#334155" strokeOpacity="0.55" />
+            {[0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+              const index = Math.min(candles.length - 1, Math.round((candles.length - 1) * fraction));
+              const x = plotLeft + (index + 0.5) * step;
+              return <text key={fraction} x={x} y={plotBottom + 28} textAnchor="middle" fill="#64748b" fontSize="11">{timeText(candles[index]?.time)}</text>;
+            })}
+            <text x={plotRight} y={height - 14} textAnchor="end" fill="#475569" fontSize="10">Hover candle for OHLC · updates every 2s</text>
+          </svg>
+        ) : (
+          <div className="grid min-h-[360px] place-items-center text-sm text-slate-500">{error || "Loading live candles..."}</div>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function TradeLevelCard({
+  enabled,
+  icon,
+  label,
+  level,
+  locked,
+  note,
+  onUpdate,
+  order,
+  plan,
+  tone,
+  triggered,
+}: {
+  enabled: boolean;
+  icon: ReactNode;
+  label: string;
+  level: number | null;
+  locked: boolean;
+  note: string;
+  onUpdate: (price: number) => Promise<void>;
+  order?: BrokerOrder;
+  plan: { stop: number | null; first: number | null; lock: number | null; second: number | null };
+  tone: "green" | "red";
+  triggered: boolean;
+}) {
+  const green = tone === "green";
+  const [draft, setDraft] = useState(level === null ? "" : String(level));
+  const [saving, setSaving] = useState(false);
+  const draftNumber = toNumber(draft);
+  useEffect(() => setDraft(level === null ? "" : String(level)), [level]);
+  const colors = green
+    ? "border-emerald-200 bg-gradient-to-br from-white to-emerald-50/70 text-emerald-700"
+    : "border-rose-200 bg-gradient-to-br from-white to-rose-50/70 text-rose-700";
+
+  return (
+    <div className={`rounded-xl border p-4 ${enabled ? colors : "border-slate-200 bg-slate-50 text-slate-400"}`}>
+      <div className="flex items-center gap-3">
+        <span className={`grid h-11 w-11 place-items-center rounded-full ${enabled ? (green ? "bg-emerald-100" : "bg-rose-100") : "bg-slate-200"}`}>
+          {icon}
+        </span>
+        <div className="min-w-0">
+          <div className="text-sm font-semibold uppercase tracking-wide">{label}</div>
+          <div className="mt-1 text-3xl font-bold tracking-tight text-slate-950">{enabled ? numberText(level) : "Disabled"}</div>
+        </div>
+        <span className={`ml-auto rounded-full px-2.5 py-1 text-xs font-semibold ${locked ? "bg-slate-700 text-white" : triggered ? (green ? "bg-emerald-600 text-white" : "bg-rose-600 text-white") : enabled ? "bg-white/90 text-slate-600 shadow-sm" : "bg-slate-200 text-slate-500"}`}>
+          {locked ? (order ? "CANCELLING" : "OCO CANCELLED") : order ? "ORDER PLACED" : triggered ? "TRIGGERED" : enabled ? level === null ? "FORMING" : "WAITING" : "OFF"}
+        </span>
+      </div>
+      {enabled && level !== null && !locked && (
+        <div className={`mt-4 rounded-xl border p-3 ${green ? "border-emerald-100 bg-white/85" : "border-rose-100 bg-white/85"}`}>
+          <div className="text-xs font-medium text-slate-600">Edit {green ? "Buy" : "Sell"} Trigger Price</div>
+          <div className="mt-2 flex gap-2">
+            <input
+              className="input min-w-0 flex-1 text-lg font-semibold"
+              inputMode="decimal"
+              onChange={(event) => setDraft(event.target.value)}
+              step="0.01"
+              type="number"
+              value={draft}
+            />
+            <button
+              className={`min-w-24 rounded-lg px-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${green ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"}`}
+              disabled={saving || draftNumber === null || draftNumber <= 0 || draftNumber === level}
+              onClick={async () => {
+                if (draftNumber === null) return;
+                setSaving(true);
+                try {
+                  await onUpdate(draftNumber);
+                } finally {
+                  setSaving(false);
+                }
+              }}
+              type="button"
+            >
+              {saving ? "Updating..." : "Update MT5"}
+            </button>
+          </div>
+        </div>
+      )}
+      <div className={`mt-4 rounded-lg border px-3 py-2 text-sm ${enabled ? (green ? "border-emerald-100 bg-emerald-50/80" : "border-rose-100 bg-rose-50/80") : "border-slate-200 bg-white"}`}>
+        {enabled ? note : note || `${label.split(" ")[0]} entries are disabled in this strategy.`}
+      </div>
+      {enabled && level !== null && (
+        <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 sm:grid-cols-4">
+          <div className="rounded-lg bg-white/75 p-2"><span className="block text-slate-400">Initial SL</span><strong className="text-slate-800">{numberText(plan.stop)}</strong></div>
+          <div className="rounded-lg bg-white/75 p-2"><span className="block text-slate-400">First Target</span><strong className="text-slate-800">{numberText(plan.first)}</strong></div>
+          <div className="rounded-lg bg-white/75 p-2"><span className="block text-slate-400">SL Lock</span><strong className="text-slate-800">{numberText(plan.lock)}</strong></div>
+          <div className="rounded-lg bg-white/75 p-2"><span className="block text-slate-400">Second Target</span><strong className="text-slate-800">{numberText(plan.second)}</strong></div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1337,6 +2067,7 @@ function SettingsView({
             </Field>
             <Field icon={<Clock3 />} label="Entry Candle Timeframe">
               <select className="input" value={form.timeframe} onChange={(event) => onField("timeframe", event.target.value)}>
+                <option value="">Select timeframe</option>
                 {timeframes.map((timeframe) => (
                   <option key={timeframe}>{timeframe}</option>
                 ))}
@@ -1344,6 +2075,7 @@ function SettingsView({
             </Field>
             <Field icon={<Clock3 />} label="Second Target Exit Trail Candle Timeframe">
               <select className="input" value={form.trail_timeframe} onChange={(event) => onField("trail_timeframe", event.target.value)}>
+                <option value="">Select timeframe</option>
                 {timeframes.map((timeframe) => (
                   <option key={timeframe}>{timeframe}</option>
                 ))}
@@ -1351,6 +2083,7 @@ function SettingsView({
             </Field>
             <Field icon={<ArrowRightLeft />} label="Entry Pattern">
               <select className="input" value={form.entry_pattern} onChange={(event) => onField("entry_pattern", event.target.value)}>
+                <option value="">Select pattern</option>
                 {patterns.map(([value, label]) => (
                   <option key={value} value={value}>
                     {label}
@@ -1359,7 +2092,7 @@ function SettingsView({
               </select>
             </Field>
             <Field icon={<Layers3 />} label="Qty">
-              <NumericInput className="input" min={0.000001} step={0.01} value={form.volume} onChange={(value) => onField("volume", value)} />
+              <NumericInput className="input" min={0.01} step={0.01} value={form.volume} onChange={(value) => onField("volume", value)} />
             </Field>
             <Field icon={<Clock3 />} label="Range Start IST">
               <input className="input" type="time" value={form.range_start} onChange={(event) => onField("range_start", event.target.value)} />
@@ -1414,6 +2147,67 @@ function SettingsView({
                 onUnitChange={(unit) => onField("second_trail_profit_unit", unit)}
               />
             </Field>
+            <Field icon={<Bot />} label="Live Trading">
+              <label className={`flex min-h-10 cursor-pointer items-center justify-between rounded-lg border px-3 py-2 transition ${form.live_trading_enabled ? "border-emerald-400 bg-emerald-50 text-emerald-900" : "border-slate-300 bg-white text-slate-700"}`}>
+                <span>
+                  <span className="block text-sm font-semibold">{form.live_trading_enabled ? "LIVE trading enabled" : "Live trading disabled"}</span>
+                  <span className="block text-xs text-slate-500">Orders follow the execution mode selected below.</span>
+                </span>
+                <input
+                  checked={form.live_trading_enabled}
+                  className="peer sr-only"
+                  onChange={(event) => onField("live_trading_enabled", event.target.checked)}
+                  type="checkbox"
+                />
+                <span className={`relative h-6 w-11 shrink-0 rounded-full transition ${form.live_trading_enabled ? "bg-emerald-600" : "bg-slate-300"}`}>
+                  <span className={`absolute top-0.5 h-5 w-5 rounded-full bg-white shadow transition ${form.live_trading_enabled ? "left-[22px]" : "left-0.5"}`} />
+                </span>
+              </label>
+            </Field>
+            <div className="md:col-span-2 xl:col-span-3 px-0.5">
+              <div className="flex min-h-4 items-center gap-2 text-[13px] font-medium text-[#14213d]">
+                <Bot className="text-emerald-600" size={16} /> Trade Execution Mode
+              </div>
+              <div className="mt-1.5 grid gap-2 lg:grid-cols-3" role="radiogroup" aria-label="Trade execution mode">
+                {[
+                  {
+                    value: "PENDING_BEFORE_SIGNAL",
+                    title: "Pre-Signal Pending Orders",
+                    note: "Start before the signal: BUY STOP and SELL STOP are placed after the range.",
+                  },
+                  {
+                    value: "MARKET_AFTER_SIGNAL",
+                    title: "Late Start Market Entry",
+                    note: "Start after a valid signal: enter its side immediately at the current market price.",
+                  },
+                  {
+                    value: "REARM_PENDING",
+                    title: "Safe Pending Re-entry",
+                    note: "After a late start, re-place only the crossed side at its original trigger; blocked if T1 or SL was reached today.",
+                  },
+                ].map((mode) => {
+                  const selected = form.execution_mode === mode.value;
+                  return (
+                    <label key={mode.value} className={`cursor-pointer rounded-lg border p-3 transition ${selected ? "border-emerald-500 bg-emerald-50 shadow-sm" : "border-slate-200 bg-white hover:border-emerald-300"}`}>
+                      <span className="flex items-start gap-2.5">
+                        <input
+                          checked={selected}
+                          className="mt-0.5 h-4 w-4 accent-emerald-600"
+                          name="execution_mode"
+                          onChange={() => onField("execution_mode", mode.value as Strategy["execution_mode"])}
+                          type="radio"
+                          value={mode.value}
+                        />
+                        <span>
+                          <span className="block text-sm font-semibold text-slate-900">{mode.title}</span>
+                          <span className="mt-1 block text-xs leading-5 text-slate-600">{mode.note}</span>
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </div>
         </div>
 
         <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-3 lg:flex-row lg:items-center lg:justify-between">
@@ -1421,7 +2215,11 @@ function SettingsView({
             <Info className="mt-0.5 shrink-0 text-blue-600" size={16} />
             <div>
               <div className="text-xs font-semibold">Important</div>
-              <div className="mt-0.5 text-xs text-blue-700">Make sure all the above settings are correct before running the algo.</div>
+              <div className="mt-0.5 text-xs text-blue-700">
+                {form.live_trading_enabled
+                  ? "LIVE mode can place real MT5 pending or market orders based on the selected execution mode."
+                  : "Live mode is OFF. No broker order will be placed until you enable it and save settings."}
+              </div>
             </div>
           </div>
           <div className="flex justify-end gap-2.5">
