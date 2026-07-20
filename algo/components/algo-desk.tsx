@@ -25,6 +25,7 @@ import {
   ScrollText,
   Target,
   Terminal,
+  Trash2,
   TrendingDown,
   TrendingUp,
   XCircle,
@@ -245,7 +246,15 @@ function toNumber(value: unknown) {
 
 function numberText(value: unknown) {
   const number = toNumber(value);
-  return number === null ? "-" : number.toLocaleString("en-IN", { maximumFractionDigits: 3 });
+  return number === null ? "-" : number.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+function roundPrice(value: number) {
+  return Math.round(value * 100) / 100;
+}
+
+function priceInputText(value: number | null) {
+  return value === null ? "" : roundPrice(value).toFixed(2);
 }
 
 function distanceToPoints(value: number, unit: string, entry: number) {
@@ -254,6 +263,11 @@ function distanceToPoints(value: number, unit: string, entry: number) {
 
 function riskValueText(value: number, unit: string) {
   return String(unit).toUpperCase() === "PERCENT" ? `${numberText(value)}%` : `${numberText(value)} pts`;
+}
+
+function targetMoveText(side: string, value: number, unit: string) {
+  const prefix = side === "SELL" ? "-" : "+";
+  return `${prefix}${riskValueText(value, unit)}`;
 }
 
 function compactTime(value?: string) {
@@ -269,6 +283,14 @@ function compactTime(value?: string) {
     second: "2-digit",
     hour12: false,
   });
+}
+
+function formatIstTimestamps(value: string) {
+  return value.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b/g, (match) => compactTime(match));
+}
+
+function prettyPayload(value: Record<string, unknown>) {
+  return formatIstTimestamps(JSON.stringify(value, null, 2));
 }
 
 function istDayKey(value?: string | Date) {
@@ -372,7 +394,7 @@ function buildTrailPlan(strategy: Strategy, signal: Signal, trade?: LogRow, quot
   const secondDistance = distanceToPoints(strategy.second_trail_profit, strategy.second_trail_profit_unit, entry);
   const firstTrigger = levelFrom(entry, side, firstDistance, "profit");
   const firstStop = firstTrailLockStop(entry, side, firstLockDistance);
-  const secondTrigger = levelFrom(entry, side, firstDistance + secondDistance, "profit");
+  const secondTrigger = levelFrom(entry, side, secondDistance, "profit");
   const move = lastClose === null ? null : side === "BUY" ? lastClose - entry : entry - lastClose;
   const firstHit = move !== null && move >= firstDistance;
   const firstStopHit =
@@ -380,7 +402,7 @@ function buildTrailPlan(strategy: Strategy, signal: Signal, trade?: LogRow, quot
     firstStop !== null &&
     lastClose !== null &&
     (side === "BUY" ? lastClose <= firstStop : lastClose >= firstStop);
-  const secondHit = move !== null && move >= firstDistance + secondDistance;
+  const secondHit = move !== null && move >= secondDistance;
 
   return { side, entry, initialStop, firstTrigger, firstStop, secondTrigger, move, firstHit, firstStopHit, secondHit };
 }
@@ -395,7 +417,7 @@ function tradeLevelPlan(strategy: Strategy, level: number | null, side: "BUY" | 
     stop: side === "BUY" ? level - stopDistance : level + stopDistance,
     first: side === "BUY" ? level + firstDistance : level - firstDistance,
     lock: side === "BUY" ? level + lockDistance : level - lockDistance,
-    second: side === "BUY" ? level + firstDistance + secondDistance : level - firstDistance - secondDistance,
+    second: side === "BUY" ? level + secondDistance : level - secondDistance,
   };
 }
 
@@ -678,10 +700,44 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
     }
   }
 
-  function selectStrategy(strategy: Strategy) {
+  async function selectStrategy(strategy: Strategy) {
     setForm(strategy);
     setMessage("");
     setError("");
+    if (state?.running) return;
+    try {
+      const data = await apiJson<AlgoState & { selection?: { message?: string } }>("/api/algo/control", {
+        method: "POST",
+        body: JSON.stringify({ action: "select", strategy_id: strategy.id }),
+      });
+      setState(data);
+      if (data.active_strategy) setForm(data.active_strategy);
+      setMessage(data.selection?.message || "Strategy selected.");
+    } catch (selectError) {
+      setError(selectError instanceof Error ? selectError.message : "Strategy selection failed.");
+    }
+  }
+
+  async function clearAllSavedSettings() {
+    if (!window.confirm("Clear all saved strategies, logs, runtime state, and cancel algo pending orders? This cannot be undone.")) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      const data = await apiJson<AlgoState & { cleared?: { message?: string } }>("/api/algo/control", {
+        method: "POST",
+        body: JSON.stringify({ action: "clear_all" }),
+      });
+      setState(data);
+      setForm(emptyStrategy);
+      setMessage(data.cleared?.message || "All saved settings cleared.");
+      if (socketRef.current?.readyState === WebSocket.OPEN) socketRef.current.send(JSON.stringify({ type: "refresh" }));
+    } catch (clearError) {
+      setError(clearError instanceof Error ? clearError.message : "Clear failed.");
+      await load().catch(() => undefined);
+    } finally {
+      setBusy(false);
+    }
   }
 
   function navigate(nextView: DeskView) {
@@ -784,6 +840,7 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
                   execution_mode: emptyStrategy.execution_mode,
                 }))
               }
+              onClearAll={clearAllSavedSettings}
               onSave={saveStrategy}
               onSymbolSearch={loadSymbols}
             />
@@ -804,7 +861,7 @@ export function AlgoDesk({ initialView = "dashboard" }: { initialView?: DeskView
               todayTrades={todayTrades}
               trailPlan={trailPlan}
               onNavigateSettings={() => navigate("settings")}
-              onSelect={selectStrategy}
+              onSelect={(strategy) => void selectStrategy(strategy)}
               onResetLevels={resetTriggerLevels}
               onUpdateLevel={updateTriggerLevel}
             />
@@ -1244,10 +1301,10 @@ function LogsView({ logs }: { logs: EventLogRow[] }) {
                     <span className="text-emerald-200">{item.event}</span>
                     {item.symbol && <span className="rounded bg-slate-900 px-1.5 py-0.5 text-slate-400">{item.symbol}</span>}
                   </div>
-                  <div className="mt-1 whitespace-pre-wrap text-slate-100">{item.message}</div>
+                  <div className="mt-1 whitespace-pre-wrap text-slate-100">{formatIstTimestamps(item.message)}</div>
                   {item.payload && Object.keys(item.payload).length > 0 && (
                     <pre className="mt-2 max-h-36 overflow-auto rounded border border-slate-800 bg-[#030508] p-2 text-[11px] text-slate-400">
-                      {JSON.stringify(item.payload, null, 2)}
+                      {prettyPayload(item.payload)}
                     </pre>
                   )}
                 </article>
@@ -1355,8 +1412,8 @@ function DashboardView({
     : signalToday
       ? activeSignal.message || "Signal checked."
       : "Today signal has not been checked yet.";
-  const firstTargetNote = `+${riskValueText(selectedStrategy.first_trail_profit, selectedStrategy.first_trail_profit_unit)}`;
-  const secondTargetNote = `+${riskValueText(selectedStrategy.second_trail_profit, selectedStrategy.second_trail_profit_unit)}`;
+  const firstTargetNote = targetMoveText(side, selectedStrategy.first_trail_profit, selectedStrategy.first_trail_profit_unit);
+  const secondTargetNote = targetMoveText(side, selectedStrategy.second_trail_profit, selectedStrategy.second_trail_profit_unit);
   const progressClass = stopLossHit ? "w-[88%]" : trailPlan.secondHit ? "w-[72%]" : trailPlan.firstHit ? "w-[34%]" : "w-[1%]";
   const progressTone = stopLossHit ? "bg-rose-600" : "bg-emerald-600";
   const signalTone = stopLossHit || side === "SELL" ? "red" : hasSignal ? "green" : "plain";
@@ -1676,7 +1733,7 @@ function LiveTradingChart({
     value
       ? new Intl.DateTimeFormat("en-IN", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Kolkata" }).format(new Date(value))
       : "--:--";
-  const priceText = (value: number) => value.toLocaleString("en-IN", { maximumFractionDigits: 3 });
+  const priceText = (value: number) => value.toLocaleString("en-IN", { maximumFractionDigits: 2 });
   const triggerIndex = signal.trigger_candle_time
     ? candles.reduce((best, candle, index) =>
         Math.abs(new Date(candle.time).getTime() - new Date(signal.trigger_candle_time || "").getTime()) <
@@ -1851,10 +1908,10 @@ function TradeLevelCard({
   triggered: boolean;
 }) {
   const green = tone === "green";
-  const [draft, setDraft] = useState(level === null ? "" : String(level));
+  const [draft, setDraft] = useState(priceInputText(level));
   const [saving, setSaving] = useState(false);
   const draftNumber = toNumber(draft);
-  useEffect(() => setDraft(level === null ? "" : String(level)), [level]);
+  useEffect(() => setDraft(priceInputText(level)), [level]);
   const colors = green
     ? "border-emerald-200 bg-gradient-to-br from-white to-emerald-50/70 text-emerald-700"
     : "border-rose-200 bg-gradient-to-br from-white to-rose-50/70 text-rose-700";
@@ -1887,12 +1944,12 @@ function TradeLevelCard({
             />
             <button
               className={`min-w-24 rounded-lg px-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-50 ${green ? "bg-emerald-600 hover:bg-emerald-700" : "bg-rose-600 hover:bg-rose-700"}`}
-              disabled={saving || draftNumber === null || draftNumber <= 0 || draftNumber === level}
+              disabled={saving || draftNumber === null || draftNumber <= 0 || (level !== null && roundPrice(draftNumber) === roundPrice(level))}
               onClick={async () => {
                 if (draftNumber === null) return;
                 setSaving(true);
                 try {
-                  await onUpdate(draftNumber);
+                  await onUpdate(roundPrice(draftNumber));
                 } finally {
                   setSaving(false);
                 }
@@ -2025,6 +2082,7 @@ function SettingsView({
   form,
   saving,
   symbols,
+  onClearAll,
   onField,
   onReset,
   onSave,
@@ -2033,6 +2091,7 @@ function SettingsView({
   form: Strategy;
   saving: boolean;
   symbols: string[];
+  onClearAll: () => void;
   onField: <K extends keyof Strategy>(key: K, value: Strategy[K]) => void;
   onReset: () => void;
   onSave: (event: FormEvent<HTMLFormElement>) => void;
@@ -2223,6 +2282,13 @@ function SettingsView({
             </div>
           </div>
           <div className="flex justify-end gap-2.5">
+            <button
+              className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-rose-300 bg-white px-3 py-2 text-sm font-semibold text-rose-700 shadow-sm transition hover:bg-rose-50"
+              onClick={onClearAll}
+              type="button"
+            >
+              <Trash2 size={16} /> Clear
+            </button>
             <button
               className="inline-flex min-h-9 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm transition hover:bg-slate-50"
               onClick={onReset}
@@ -2594,7 +2660,7 @@ function LogPanel({ title, rows }: { title: string; rows: LogRow[] }) {
                   <td className="py-2 pr-3">{numberText(row.entry_price ?? row.payload?.entry_reference)}</td>
                   <td className="py-2 pr-3">{numberText(row.stop_loss ?? row.payload?.stop_loss)}</td>
                   <td className="py-2 pr-3">{row.status || "-"}</td>
-                  <td className="py-2 pr-3 text-neutral-600">{row.message || String(row.payload?.message || "-")}</td>
+                  <td className="py-2 pr-3 text-neutral-600">{formatIstTimestamps(row.message || String(row.payload?.message || "-"))}</td>
                 </tr>
               ))
             ) : (

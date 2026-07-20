@@ -214,6 +214,7 @@ def connect() -> sqlite3.Connection:
         VALUES (1, 0, 'Ready.')
         """
     )
+    ensure_runtime_active_strategy(connection)
     prune_event_logs(connection)
     return connection
 
@@ -227,6 +228,42 @@ def ensure_column(connection: sqlite3.Connection, table: str, column: str, decla
 def prune_event_logs(connection: sqlite3.Connection) -> None:
     today = now_ist().date().isoformat()
     connection.execute("DELETE FROM event_log WHERE day_key != ?", (today,))
+
+
+def strategy_exists(connection: sqlite3.Connection, strategy_id: str) -> bool:
+    return bool(strategy_id and connection.execute("SELECT 1 FROM strategies WHERE id = ?", (strategy_id,)).fetchone())
+
+
+def legacy_active_strategy_id() -> str:
+    if not LEGACY_JSON.exists():
+        return ""
+    try:
+        legacy = json.loads(LEGACY_JSON.read_text(encoding="utf-8"))
+    except Exception:
+        return ""
+    return str(legacy.get("active_strategy_id") or "")
+
+
+def ensure_runtime_active_strategy(connection: sqlite3.Connection) -> None:
+    runtime = connection.execute("SELECT active_strategy_id FROM runtime WHERE id = 1").fetchone()
+    current_id = str(runtime["active_strategy_id"] or "") if runtime else ""
+    if strategy_exists(connection, current_id):
+        return
+
+    restored_id = legacy_active_strategy_id()
+    if not strategy_exists(connection, restored_id):
+        row = connection.execute("SELECT id FROM strategies ORDER BY updated_at DESC LIMIT 1").fetchone()
+        restored_id = str(row["id"] or "") if row else ""
+    if restored_id:
+        connection.execute(
+            """
+            UPDATE runtime
+            SET active_strategy_id = ?, last_error = '',
+                algo_status = CASE WHEN algo_status = '' OR active_strategy_id = '' THEN 'Saved strategy restored.' ELSE algo_status END
+            WHERE id = 1
+            """,
+            (restored_id,),
+        )
 
 
 def add_event_log(
@@ -872,9 +909,9 @@ def scan_signal(connection: sqlite3.Connection, strategy_id: str | None = None) 
         )
         first_trail_stop = first_trail_lock_stop(entry_reference, first_lock_distance, side)
         second_trail_trigger = (
-            entry_reference + first_trail_distance + second_trail_distance
+            entry_reference + second_trail_distance
             if side == "BUY"
-            else entry_reference - first_trail_distance - second_trail_distance
+            else entry_reference - second_trail_distance
         )
         result.update(
             {
@@ -1276,7 +1313,7 @@ def manage_live_positions(
         lock_distance = distance_to_points(strategy["first_trail_lock_loss"], strategy["first_trail_lock_loss_unit"], entry)
         second_distance = distance_to_points(strategy["second_trail_profit"], strategy["second_trail_profit_unit"], entry)
         first_lock = entry + lock_distance if side == "BUY" else entry - lock_distance
-        if move >= first_distance + second_distance:
+        if move >= second_distance:
             candle_stop = last_completed_trail_level(symbol, strategy["trail_timeframe"], side)
             if candle_stop is not None:
                 candidate = max(first_lock, candle_stop) if side == "BUY" else min(first_lock, candle_stop)
@@ -1548,7 +1585,7 @@ def update_pending_trigger(
             "stop_loss": stop_loss,
             "first_target": price + first_distance if side == "BUY" else price - first_distance,
             "first_lock": price + lock_distance if side == "BUY" else price - lock_distance,
-            "second_target": price + first_distance + second_distance if side == "BUY" else price - first_distance - second_distance,
+            "second_target": price + second_distance if side == "BUY" else price - second_distance,
         }
     finally:
         mt5.shutdown()
@@ -1821,9 +1858,85 @@ def command_strategy_delete(connection: sqlite3.Connection, payload: dict[str, A
     return {"ok": True}
 
 
+def command_clear_all(connection: sqlite3.Connection, _: dict[str, Any]) -> dict[str, Any]:
+    active_symbols = [
+        str(row["symbol"] or "")
+        for row in connection.execute(
+            """
+            SELECT DISTINCT s.symbol
+            FROM runtime r
+            LEFT JOIN strategies s ON s.id = r.active_strategy_id
+            WHERE s.symbol IS NOT NULL AND s.symbol != ''
+            """
+        ).fetchall()
+    ]
+    cancellations = [cancel_algo_pending_orders(symbol, "All saved algo data cleared") for symbol in active_symbols]
+    with connection:
+        connection.execute("DELETE FROM signal_log")
+        connection.execute("DELETE FROM trade_log")
+        connection.execute("DELETE FROM event_log")
+        connection.execute("DELETE FROM strategies")
+        connection.execute(
+            """
+            UPDATE runtime
+            SET running = 0,
+                active_strategy_id = '',
+                started_at = '',
+                stopped_at = ?,
+                last_error = '',
+                algo_status = 'All saved settings cleared.',
+                pending_order_day = '',
+                last_signal_json = '{}',
+                buy_trigger_override = NULL,
+                sell_trigger_override = NULL,
+                trigger_override_day = ''
+            WHERE id = 1
+            """,
+            (now_utc(),),
+        )
+    state = runtime_state(connection)
+    return {
+        "ok": True,
+        "cleared": {
+            "status": "ALL_SETTINGS_CLEARED",
+            "message": "All saved strategies, runtime state, and logs were cleared.",
+            "cancellations": cancellations,
+        },
+        **state,
+    }
+
+
 def command_control(connection: sqlite3.Connection, payload: dict[str, Any]) -> dict[str, Any]:
     action = str(payload.get("action") or "").lower()
     strategy_id = str(payload.get("strategy_id") or payload.get("id") or "")
+    if action == "clear_all":
+        return command_clear_all(connection, payload)
+    if action == "select":
+        if not strategy_id:
+            raise ValueError("Strategy id is required.")
+        if connection.execute("SELECT 1 FROM strategies WHERE id = ?", (strategy_id,)).fetchone() is None:
+            raise ValueError("Strategy not found.")
+        runtime = connection.execute("SELECT running FROM runtime WHERE id = 1").fetchone()
+        if runtime and runtime["running"]:
+            return {
+                "ok": True,
+                "selection": {
+                    "status": "RUNNING_NOT_SWITCHED",
+                    "message": "Algo is running; stop it or press Start with this strategy to switch.",
+                    "strategy_id": strategy_id,
+                },
+                **runtime_state(connection),
+            }
+        with connection:
+            connection.execute(
+                "UPDATE runtime SET active_strategy_id = ?, last_error = '', algo_status = 'Strategy selected.' WHERE id = 1",
+                (strategy_id,),
+            )
+        return {
+            "ok": True,
+            "selection": {"status": "STRATEGY_SELECTED", "message": "Strategy selected.", "strategy_id": strategy_id},
+            **runtime_state(connection),
+        }
     if action == "update_level":
         if not strategy_id:
             strategy_id = str(connection.execute("SELECT active_strategy_id FROM runtime WHERE id = 1").fetchone()["active_strategy_id"] or "")
@@ -1860,6 +1973,9 @@ def command_control(connection: sqlite3.Connection, payload: dict[str, Any]) -> 
             **runtime_state(connection),
         }
     if action == "start":
+        if not strategy_id:
+            runtime = connection.execute("SELECT active_strategy_id FROM runtime WHERE id = 1").fetchone()
+            strategy_id = str(runtime["active_strategy_id"] or "") if runtime else ""
         if not strategy_id:
             row = connection.execute("SELECT id FROM strategies ORDER BY updated_at DESC LIMIT 1").fetchone()
             if row is None:
