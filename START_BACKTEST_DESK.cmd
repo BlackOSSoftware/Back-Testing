@@ -197,6 +197,7 @@ function Get-PythonLauncher {
             FilePath = $python.Source
             ServerArgs = @("-m", "backtest.server")
             ProbeArgs = @("-c", "import MetaTrader5, flask, pandas, openpyxl")
+            InstallArgs = @("-m", "pip", "install", "-r", "backtest\requirements.txt")
             DisplayCommand = "python -m backtest.server"
             InstallCommand = "python -m pip install -r backtest\requirements.txt"
         }
@@ -208,6 +209,7 @@ function Get-PythonLauncher {
             FilePath = $py.Source
             ServerArgs = @("-3", "-m", "backtest.server")
             ProbeArgs = @("-3", "-c", "import MetaTrader5, flask, pandas, openpyxl")
+            InstallArgs = @("-3", "-m", "pip", "install", "-r", "backtest\requirements.txt")
             DisplayCommand = "py -3 -m backtest.server"
             InstallCommand = "py -3 -m pip install -r backtest\requirements.txt"
         }
@@ -219,13 +221,47 @@ function Get-PythonLauncher {
 function Test-PythonDependencies {
     $launcher = Get-PythonLauncher
     Write-Step "Checking Python requirements."
-    $output = & $launcher.FilePath @($launcher.ProbeArgs) 2>&1
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        # Windows PowerShell can promote redirected native stderr (including a
+        # Python traceback) to a terminating error when the global preference
+        # is Stop. Capture it without aborting so we can repair dependencies.
+        $ErrorActionPreference = "Continue"
+        $output = & $launcher.FilePath @($launcher.ProbeArgs) 2>&1
+        $probeExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+
+    if ($probeExitCode -eq 0) {
+        Write-Step "Python requirements are ready."
+        return
+    }
+
+    if ($output) {
+        $output | ForEach-Object { Write-Host $_ }
+    }
+    Write-Step "Installing missing Python requirements."
+    & $launcher.FilePath @($launcher.InstallArgs)
     if ($LASTEXITCODE -ne 0) {
+        throw "Python requirements installation failed. Run this from the project folder: $($launcher.InstallCommand)"
+    }
+
+    $previousErrorAction = $ErrorActionPreference
+    try {
+        $ErrorActionPreference = "Continue"
+        $output = & $launcher.FilePath @($launcher.ProbeArgs) 2>&1
+        $probeExitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorAction
+    }
+    if ($probeExitCode -ne 0) {
         if ($output) {
             $output | ForEach-Object { Write-Host $_ }
         }
-        throw "Python requirements are missing. Run this from the project folder: $($launcher.InstallCommand)"
+        throw "Python requirements are still unavailable after installation. Run: $($launcher.InstallCommand)"
     }
+    Write-Step "Python requirements are ready."
 }
 
 function Remove-ChromeProfile {
