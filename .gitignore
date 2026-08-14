@@ -18,11 +18,8 @@ backtest/instance/
 cache/
 results/
 instance/
-algo/instance/
-algo/.next/
-algo/node_modules/
-algo/data/
-algo/*.tsbuildinfo
+# Algo Desk is maintained in its own Git repository.
+algo/
 backtest/report_data.js
 report_data.js
 
