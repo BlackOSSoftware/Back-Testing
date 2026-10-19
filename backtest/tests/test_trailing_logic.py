@@ -4,6 +4,7 @@ import sys
 import unittest
 from datetime import date, time
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -16,14 +17,31 @@ from backtest.backtest_mt5 import (  # noqa: E402
     backtest,
     current_and_previous_high,
     first_trail_lock_stop,
+    fetch_rates,
     manage_buy_trade,
     manage_sell_trade,
     price_at_or_above,
 )
-from backtest.optimizer_engine import EntryLayout, ScanContext, build_scan_context, evaluate_scan  # noqa: E402
+from backtest.optimizer_engine import EntryLayout, ScanContext, build_execution_layout, build_scan_context, evaluate_scan  # noqa: E402
 
 
 DAY = date(2026, 5, 15)
+
+
+class Mt5HistoryValidationTest(unittest.TestCase):
+    def test_out_of_range_candle_does_not_count_as_requested_history(self) -> None:
+        config = BacktestConfig(symbol="BTCUSD#", from_date=date(2026, 6, 1), to_date=date(2026, 6, 30), timeframe="M1")
+        stale = pd.DataFrame([{"time": int(pd.Timestamp("2026-08-10T21:22:00Z").timestamp()), "open": 1, "high": 1, "low": 1, "close": 1, "tick_volume": 1}])
+        with patch("backtest.backtest_mt5.mt5.initialize", return_value=True), \
+             patch("backtest.backtest_mt5.mt5.terminal_info") as terminal, \
+             patch("backtest.backtest_mt5.mt5.account_info", return_value=object()), \
+             patch("backtest.backtest_mt5.mt5.symbol_select", return_value=True), \
+             patch("backtest.backtest_mt5.detect_broker_time_shift_hours", return_value=0), \
+             patch("backtest.backtest_mt5.copy_rates_range_chunked", return_value=stale), \
+             patch("backtest.backtest_mt5.mt5.shutdown"):
+            terminal.return_value.connected = True
+            with self.assertRaisesRegex(RuntimeError, "No MT5 M1 candle data within 2026-06-01 to 2026-06-30"):
+                fetch_rates(config)
 
 
 def candle_time(value: str) -> pd.Timestamp:
@@ -284,6 +302,53 @@ class TrailingStopLogicTest(unittest.TestCase):
         self.assertEqual(trades[0].quantity, 2.0)
         self.assertEqual(trades[0].pnl_amount, -20.0)
         self.assertEqual(trades[0].pnl_pct, -10.0)
+
+    def test_entry_after_cutoff_inside_signal_candle_is_rejected(self) -> None:
+        signal = candle_frame(
+            [
+                ("16:30", 95.0, 100.0, 90.0, 95.0),
+                ("17:30", 95.0, 99.0, 91.0, 96.0),
+                ("18:00", 96.0, 101.0, 89.0, 97.0),
+                ("18:03", 97.0, 98.0, 96.0, 97.0),
+            ]
+        )
+        execution = candle_frame(
+            [
+                ("17:30", 95.0, 99.0, 91.0, 96.0),
+                ("18:00", 96.0, 100.0, 95.0, 99.0),
+                ("18:01", 99.0, 100.0, 98.0, 99.0),
+                ("18:02", 99.0, 101.0, 98.0, 100.0),
+                ("19:30", 100.0, 100.0, 100.0, 100.0),
+            ]
+        )
+        config = BacktestConfig(
+            symbol="TEST",
+            from_date=DAY,
+            to_date=DAY,
+            timeframe="M3",
+            trail_timeframe="M3",
+            range_start=time(16, 30),
+            range_end=time(17, 30),
+            session_start=time(17, 30),
+            entry_cutoff=time(18, 0),
+            session_end=time(19, 30),
+            entry_buffer_pct=0.0005,
+            stop_points=500.0,
+            first_trail_profit=500.0,
+            first_trail_lock_loss=400.0,
+            second_trail_profit=700.0,
+        )
+
+        self.assertEqual(backtest(signal, config, signal, execution), [])
+        layout = build_execution_layout(signal, execution, config)
+        included = layout.times_ns[: int(layout.cutoff_ends[0])]
+        self.assertIn(candle_time("18:00").value, included)
+        self.assertNotIn(candle_time("18:02").value, included)
+
+        execution.loc[execution["time_ist"] == candle_time("18:00"), "high"] = 101.0
+        trades = backtest(signal, config, signal, execution)
+        self.assertEqual(len(trades), 1)
+        self.assertEqual(trades[0].entry_time, candle_time("18:00").isoformat())
 
     def test_first_trail_lock_does_not_move_to_unreached_price(self) -> None:
         execution = candle_frame(

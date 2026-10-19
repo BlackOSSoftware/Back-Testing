@@ -121,7 +121,7 @@
             </label>
             <label>
               <span class="setup-label tone-slate"><i data-lucide="hash"></i>Qty <button class="info-btn" type="button" title="P&L amount points ko is quantity se multiply karke dikhega. Example: 100 points x qty 2 = 200 amount.">?</button></span>
-              <input name="quantity" type="number" value="1" step="0.01" min="0.000001" required />
+              <input name="quantity" type="number" value="1" step="0.01" min="0.01" required />
             </label>
             <label>
               <span class="setup-label tone-pink"><i data-lucide="calendar-days"></i>From Date</span>
@@ -230,7 +230,7 @@
             </label>
             <label>
               <span class="setup-label tone-slate"><i data-lucide="hash"></i>Qty</span>
-              <input id="optimizerQuantityInput" name="quantity" type="number" value="1" step="0.01" min="0.000001" required />
+              <input id="optimizerQuantityInput" name="quantity" type="number" value="1" step="0.01" min="0.01" required />
             </label>
             <label class="optimizer-picker-label">
               <span>Entry Timeframes</span>
@@ -1111,12 +1111,16 @@
           const trailPromise = trailTimeframe === entryTimeframe
             ? entryPromise
             : apiJson(`/api/history-range?${new URLSearchParams({ source, symbol, timeframe: trailTimeframe, from_date: fromDate, to_date: toDate }).toString()}`);
-          const [entryResult, trailResult] = await Promise.all([entryPromise, trailPromise]);
+          const executionPromise = entryTimeframe === "M1" ? entryPromise
+            : trailTimeframe === "M1" ? trailPromise
+            : apiJson(`/api/history-range?${new URLSearchParams({ source, symbol, timeframe: "M1", from_date: fromDate, to_date: toDate }).toString()}`);
+          const [entryResult, trailResult, executionResult] = await Promise.all([entryPromise, trailPromise, executionPromise]);
           if (requestId !== historyRequestId) return;
-          historyInfo = { entry: entryResult, trail: trailResult };
-          if (!entryResult.available || !trailResult.available) {
+          historyInfo = { entry: entryResult, trail: trailResult, execution: executionResult };
+          if (!entryResult.available || !trailResult.available || !executionResult.available) {
             const launchText = entryResult.launch_date ? ` Contract launched ${entryResult.launch_date}.` : "";
-            el.querySelector("span:last-child").textContent = `Required candle history not found.${launchText}`;
+            const missing = [!entryResult.available && `entry ${entryTimeframe}`, !trailResult.available && `trail ${trailTimeframe}`, !executionResult.available && "execution M1"].filter(Boolean).join(", ");
+            el.querySelector("span:last-child").textContent = `Required ${missing} candle history not found.${launchText}`;
             return;
           }
           if (source === "DELTA") {
@@ -1126,7 +1130,7 @@
               `Delta online candles are downloaded in chunks on Run Backtest and stored locally for faster reruns. Entry uses ${entryTimeframe}; +${secondTargetLabel} exit trail uses ${trailTimeframe}.`;
           } else {
             el.querySelector("span:last-child").textContent =
-              `Entry ${entryTimeframe}: ${entryResult.from_date} to ${entryResult.to_date} | Trail ${trailTimeframe}: ${trailResult.from_date} to ${trailResult.to_date}`;
+              `Entry ${entryTimeframe}: ${entryResult.from_date} to ${entryResult.to_date} | Trail ${trailTimeframe}: ${trailResult.from_date} to ${trailResult.to_date} | Execution M1: ${executionResult.from_date} to ${executionResult.to_date}`;
             document.getElementById("dataNoteText").textContent =
               `Local MT5 data: entry candles use ${entryTimeframe}; after +${secondTargetLabel}, current and previous ${trailTimeframe} candles set the trail exit.`;
           }

@@ -224,7 +224,7 @@ class OptimizerPayloadTest(unittest.TestCase):
         self.assertEqual(loaded["results"][0]["quantity"], 2.0)
         self.assertEqual(loaded["results"][0]["net_amount"], 20.0)
 
-    def test_optimizer_keeps_full_signal_candle_execution_window_after_cutoff(self) -> None:
+    def test_optimizer_rejects_execution_after_entry_cutoff(self) -> None:
         signal_h4 = candle_frame(
             [
                 ("06:30", 95.0, 100.0, 90.0, 95.0),
@@ -241,12 +241,17 @@ class OptimizerPayloadTest(unittest.TestCase):
                 ("21:30", 100.5, 100.5, 100.5, 100.5),
             ]
         )
+        allowed_execution = execution_m1.copy()
+        late_entry = pd.Timestamp.combine(DAY, time(19, 15)).tz_localize("Asia/Kolkata")
+        allowed_execution.loc[allowed_execution["time_ist"] == late_entry, "time_ist"] = late_entry.replace(minute=0)
+
+        active_execution = execution_m1
 
         def fake_fetch(config):
             if config.timeframe == "H4":
                 return signal_h4.copy()
             if config.timeframe == "M1":
-                return execution_m1.copy()
+                return active_execution.copy()
             raise AssertionError(f"Unexpected timeframe: {config.timeframe}")
 
         def fake_save(job, payload, rows, **kwargs):
@@ -308,11 +313,25 @@ class OptimizerPayloadTest(unittest.TestCase):
                 server_module, "save_optimizer_output", side_effect=fake_save
             ):
                 execute_optimizer(job_id, payload)
-            job = server_module._optimizer_jobs[job_id]
-            self.assertEqual(job["status"], "completed")
-            self.assertEqual(job["results"][0]["total_trades"], 1)
+                job = server_module._optimizer_jobs[job_id]
+                self.assertEqual(job["status"], "completed")
+                self.assertEqual(job["results"], [])
+
+                active_execution = allowed_execution
+                allowed_job_id = "unit-test-signal-cutoff-allowed"
+                server_module._optimizer_jobs[allowed_job_id] = {
+                    **server_module._optimizer_jobs[job_id],
+                    "scan_id": allowed_job_id,
+                    "status": "queued",
+                    "results": [],
+                }
+                execute_optimizer(allowed_job_id, payload)
+                allowed_job = server_module._optimizer_jobs[allowed_job_id]
+                self.assertEqual(allowed_job["status"], "completed")
+                self.assertEqual(allowed_job["results"][0]["total_trades"], 1)
         finally:
             server_module._optimizer_jobs.pop(job_id, None)
+            server_module._optimizer_jobs.pop("unit-test-signal-cutoff-allowed", None)
 
 
 if __name__ == "__main__":

@@ -296,14 +296,9 @@ def build_execution_layout(signal_df: pd.DataFrame, execution_df: pd.DataFrame, 
         starts.append(offset)
         ends.append(offset + size)
 
-        last_signal_pos = cutoff_signal_right - 1
-        if last_signal_pos + 1 < signal_session_right:
-            cutoff_end_value = signal_times[last_signal_pos + 1]
-        else:
-            timeframe_ns = TIMEFRAME_MINUTES[config.timeframe.upper()] * 60 * 1_000_000_000
-            session_end_plus_one = session_end.value + 60 * 1_000_000_000
-            cutoff_end_value = min(signal_times[last_signal_pos] + timeframe_ns, session_end_plus_one)
-        cutoff_right = int(np.searchsorted(execution_times, cutoff_end_value, side="left"))
+        # Entry fill uses the execution candle open. Do not keep scanning to the
+        # end of a signal candle that started on the cutoff minute.
+        cutoff_right = int(np.searchsorted(execution_times, entry_cutoff.value, side="right"))
         cutoff_ends.append(offset + max(0, min(size, cutoff_right - session_left)))
         range_highs.append(float(np.max(signal_highs[range_left:range_right])))
         range_lows.append(float(np.min(signal_lows[range_left:range_right])))

@@ -380,8 +380,8 @@ def scan_values(data: dict, key: str, default: list, cast, maximum: int = 12) ->
 def parse_quantity(value, default: float = 1.0) -> float:
     raw = default if value in {None, ""} else value
     quantity = float(raw)
-    if quantity <= 0:
-        raise ValueError("Quantity must be greater than zero.")
+    if quantity < 0.01:
+        raise ValueError("Quantity must be at least 0.01.")
     return quantity
 
 
@@ -1867,7 +1867,7 @@ def history_range():
         )
         df = fetch_rates(config)
     except Exception as exc:
-        if "No MT5 candle data returned" not in str(exc):
+        if not str(exc).startswith("No MT5 ") or "candle data" not in str(exc):
             return jsonify({"error": str(exc)}), 400
         result = {"symbol": symbol, "timeframe": timeframe, "available": False}
     else:

@@ -148,8 +148,8 @@ class BacktestConfig:
         self.first_trail_lock_loss_unit = normalize_distance_unit(self.first_trail_lock_loss_unit)
         self.second_trail_profit_unit = normalize_distance_unit(self.second_trail_profit_unit)
         self.quantity = float(self.quantity)
-        if self.quantity <= 0:
-            raise ValueError("Quantity must be greater than zero.")
+        if self.quantity < 0.01:
+            raise ValueError("Quantity must be at least 0.01.")
 
     def stop_distance_points(self, entry_price: float) -> float:
         return distance_to_points(self.stop_points, self.stop_points_unit, entry_price)
@@ -190,6 +190,10 @@ def fetch_rates(config: BacktestConfig) -> pd.DataFrame:
         raise RuntimeError(f"MT5 initialize failed: {mt5.last_error()}")
 
     try:
+        terminal = mt5.terminal_info()
+        account = mt5.account_info()
+        if terminal is None or not terminal.connected or account is None:
+            raise RuntimeError("MT5 terminal is not connected to a broker account.")
         if not mt5.symbol_select(config.symbol, True):
             raise RuntimeError(f"Symbol not available in MT5 Market Watch: {config.symbol}")
 
@@ -208,6 +212,11 @@ def fetch_rates(config: BacktestConfig) -> pd.DataFrame:
     df["time_ist"] = df["time_ist"] - pd.Timedelta(hours=time_shift_hours)
     df["trade_date"] = df["time_ist"].dt.date
     df = df[(df["trade_date"] >= config.from_date) & (df["trade_date"] <= config.to_date)]
+    if df.empty:
+        raise RuntimeError(
+            f"No MT5 {timeframe} candle data within {config.from_date} to {config.to_date} "
+            f"for {config.symbol}. Check broker history and the terminal's Max. bars in chart setting."
+        )
     df = df[["time_ist", "trade_date", "open", "high", "low", "close", "tick_volume"]].copy()
     _rates_cache[cache_key] = (monotonic(), df)
     return df.copy()
@@ -522,8 +531,12 @@ def backtest(
                 continue
             signal_start = row["time_ist"]
             signal_end = min(candle_end_time(session_df, idx, config), session_end + timedelta(minutes=1))
+            # The signal candle may open on the cutoff minute and continue past it.
+            # A fill is allowed only while its own open time is still at or before cutoff.
             execution_window = execution_session_df[
-                (execution_session_df["time_ist"] >= signal_start) & (execution_session_df["time_ist"] < signal_end)
+                (execution_session_df["time_ist"] >= signal_start)
+                & (execution_session_df["time_ist"] < signal_end)
+                & (execution_session_df["time_ist"].dt.time <= config.entry_cutoff)
             ].reset_index(drop=True)
             execution_entry = choose_execution_trigger(execution_window, buy_trigger, sell_trigger, config.entry_pattern)
             if execution_entry is None:
